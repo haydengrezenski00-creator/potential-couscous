@@ -843,6 +843,31 @@ const Field = {
 const keys = {};
 const touchDir = { up:false, down:false, left:false, right:false };
 
+// Each round plays differently, matched to the player's archetype:
+//   0 Linebacker — bulldoze a wall of blockers (contact-heavy, day game)
+//   1 Receiver   — weave open field and catch passes (collectibles, dusk)
+//   2 Running back— grind through paired traffic (pick gaps, night game)
+const ROUND_CFG = [
+  {
+    objective: "Lower the boom — bulldoze through the line. Big hits, bigger toll.",
+    formation:'wall', spawnEvery:1.25, defSpeed:6, defSteer:0.8, collect:false,
+    sky:['#2a4868','#3a5d82','#0d141c'], turf:[[44,124,60],[34,102,50]],
+    crowdRows:3, crowdStep:2.4, defColor:[68,84,156], defHelm:[48,60,120],
+  },
+  {
+    objective: "Find the open field — catch the passes, slip the tacklers.",
+    formation:'scattered', spawnEvery:0.85, defSpeed:11, defSteer:2.6, collect:true,
+    sky:['#3c2446','#5c2f54','#160b18'], turf:[[36,100,52],[28,82,44]],
+    crowdRows:2, crowdStep:3.4, defColor:[64,70,84], defHelm:[46,52,66],
+  },
+  {
+    objective: "Carry the load — grind through traffic, pick your gaps.",
+    formation:'pairs', spawnEvery:0.8, defSpeed:8, defSteer:1.6, collect:false,
+    sky:['#10141d','#1c2433','#06080c'], turf:[[30,88,46],[22,70,38]],
+    crowdRows:3, crowdStep:2.6, defColor:[128,62,62], defHelm:[96,46,46],
+  },
+];
+
 // ---- 3D math --------------------------------------------------------------
 const LIGHT = (()=>{ const v=[-0.4,1.0,0.25]; const l=Math.hypot(...v); return [v[0]/l,v[1]/l,v[2]/l]; })();
 function vsub(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
@@ -947,9 +972,10 @@ function beginFieldPhase(){
 
 function buildCrowd(){
   Field.crowd = [];
+  const rows = Field.cfg.crowdRows, step = Field.cfg.crowdStep;
   for (let side of [-1, 1]){
-    for (let z = 12; z > -480; z -= 2.4){
-      for (let row = 0; row < 3; row++){
+    for (let z = 12; z > -480; z -= step){
+      for (let row = 0; row < rows; row++){
         const x = side * (14.5 + row*1.1);
         const y = 2.2 + row*1.0 + (Math.random()*0.3);
         const hue = Math.random();
@@ -972,8 +998,11 @@ function startFieldRound(idx){
   Field.spawnTimer = 0.6;
   Field.bob = 0;
   Field.defenders = [];
+  Field.items = [];
+  Field.itemTimer = 0.8;
   Field.player = { x:0, z:0 };
   Field.active = true;
+  Field.cfg = ROUND_CFG[idx];
   buildCrowd();
 
   const p = PLAYERS[idx];
@@ -986,7 +1015,9 @@ function startFieldRound(idx){
   if (isTouch()) $('touchpad').classList.add('show');
 
   if (idx===0){
-    showHint("◀ ▶ to dodge, ▲ to burst. You run upfield automatically. Hold SHIFT or TRUCK to bulldoze tacklers — more yards, but more damage.");
+    showHint("◀ ▶ dodge · ▲ burst · SHIFT / TRUCK to bulldoze. " + Field.cfg.objective);
+  } else {
+    showHint(Field.cfg.objective);
   }
   Field.lastTs = performance.now();
   cancelAnimationFrame(Field.raf);
@@ -999,16 +1030,28 @@ function updateFieldHud(){
   $('hudMid').innerHTML = `<span class="lbl">Round ${Field.round+1}/3 · ${p.debut+Field.round}</span><span class="val">${Math.ceil(Field.timeLeft)}s</span>`;
 }
 
-function spawnDefender(){
-  const speed = 7 + Math.random()*5 + Field.round*1.4;
+function pushDefender(x){
+  const cfg = Field.cfg;
   Field.defenders.push({
-    x: (Math.random()*2-1)*LANE,
-    z: Field.player.z - 38 - Math.random()*16,
-    speed,
-    steer: 1.6 + Math.random()*1.4,
+    x: Math.max(-LANE, Math.min(LANE, x)),
+    z: Field.player.z - 34 - Math.random()*14,
+    speed: cfg.defSpeed + Math.random()*2 + Field.round*0.6,
+    steer: cfg.defSteer,
     legPhase: Math.random()*6,
     hit:false, gone:false,
   });
+}
+function spawnWave(){
+  const cfg = Field.cfg;
+  if (cfg.formation==='wall'){
+    const gap = Math.floor(Math.random()*5);          // one open lane to aim for
+    for (let i=0;i<5;i++){ if (i===gap) continue; pushDefender(-LANE + (i/4)*2*LANE); }
+  } else if (cfg.formation==='pairs'){
+    const cx = (Math.random()*2-1)*(LANE-2.5);          // a blocking duo, gaps either side
+    pushDefender(cx-1.8); pushDefender(cx+1.8);
+  } else {
+    pushDefender((Math.random()*2-1)*LANE);             // lone fast pursuer
+  }
 }
 
 function loopField(ts){
@@ -1044,10 +1087,9 @@ function updateField(dt){
   p.z -= fwd * dt;
   Field.yards += fwd * dt * 0.55;
 
-  // spawn defenders
+  // spawn defenders by formation
   Field.spawnTimer -= dt;
-  const rate = Math.max(0.32, 0.62 - Field.round*0.06);
-  if (Field.spawnTimer<=0){ spawnDefender(); Field.spawnTimer = rate + Math.random()*0.35; }
+  if (Field.spawnTimer<=0){ spawnWave(); Field.spawnTimer = Field.cfg.spawnEvery + Math.random()*0.4; }
 
   for (const d of Field.defenders){
     const dx = p.x - d.x;
@@ -1060,6 +1102,21 @@ function updateField(dt){
     if (d.z > p.z + 6) d.gone = true;  // ran past behind the player
   }
   Field.defenders = Field.defenders.filter(d=> !d.gone);
+
+  // collectible passes (receiver round)
+  if (Field.cfg.collect){
+    Field.itemTimer -= dt;
+    if (Field.itemTimer<=0){
+      Field.items.push({ x:(Math.random()*2-1)*(LANE-1), z:p.z-32-Math.random()*12, got:false });
+      Field.itemTimer = 0.9 + Math.random()*0.7;
+    }
+  }
+  for (const it of Field.items){
+    if (!it.got && Math.abs(it.z-p.z)<1.5 && Math.abs(it.x-p.x)<1.7){
+      it.got = true; Field.yards += 14; Field.flash = Math.max(Field.flash, 0.3); Audio.sfxDing();
+    }
+  }
+  Field.items = Field.items.filter(it=> !it.got && it.z < p.z+6);
 
   updateFieldHud();
   if (Field.timeLeft <= 0) endFieldRound();
@@ -1093,9 +1150,10 @@ function renderField(){
   const p = Field.player;
   const pz = p.z;
 
-  // sky / stadium backdrop
+  // sky / stadium backdrop (per-round palette)
+  const sk = Field.cfg.sky;
   const sky = fctx.createLinearGradient(0,0,0,VH);
-  sky.addColorStop(0, "#0c1018"); sky.addColorStop(0.55, "#10161f"); sky.addColorStop(1, "#0a0c10");
+  sky.addColorStop(0, sk[0]); sky.addColorStop(0.55, sk[1]); sky.addColorStop(1, sk[2]);
   fctx.fillStyle = sky; fctx.fillRect(0,0,VW,VH);
 
   // camera (angled, slightly behind — high three-quarter view)
@@ -1105,9 +1163,10 @@ function renderField(){
 
   const zNear = pz + 14, zFar = pz - 92;
 
-  // ground stripes (mowed turf)
+  // ground stripes (mowed turf, per-round shade)
+  const tf = Field.cfg.turf;
   for (let z = Math.ceil(zNear/5)*5; z > zFar; z -= 5){
-    const shade = (Math.floor(z/5)%2===0) ? [34,108,52] : [26,86,42];
+    const shade = (Math.floor(z/5)%2===0) ? tf[0] : tf[1];
     addFace([[-13,0,z],[13,0,z],[13,0,z-5],[-13,0,z-5]], shade, {});
   }
   // sidelines
@@ -1130,10 +1189,17 @@ function renderField(){
     addFace([[x,y-0.32,z-0.32],[x,y-0.32,z+0.32],[x,y+0.32,z+0.32],[x,y+0.32,z-0.32]], rgb, {flat:true});
   }
 
-  // defenders (boxy figures)
+  // footballs to catch (receiver round)
+  for (const it of Field.items){
+    if (it.got || it.z < zFar || it.z > zNear) continue;
+    const yb = 1.1 + Math.abs(Math.sin(Field.bob*0.6 + it.x))*0.25;
+    addBox([it.x, yb, it.z], [0.6,0.36,0.36], [150,84,42], q=>q);
+  }
+
+  // defenders (boxy figures, per-round opponent colors)
   for (const d of Field.defenders){
     if (d.z < zFar || d.z > zNear) continue;
-    addFigure(d.x, d.z, [54,60,72], [40,46,58], d.legPhase, 0, 0);
+    addFigure(d.x, d.z, Field.cfg.defColor, Field.cfg.defHelm, d.legPhase, 0, 0);
   }
 
   // player (skip on invuln blink frames)
