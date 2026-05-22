@@ -240,6 +240,8 @@
     letter-spacing: 1px;
   }
   .tool.on { background: var(--accent); color: #14110a; }
+  @keyframes toolpulse { 0%,100%{ box-shadow:0 0 0 0 rgba(201,162,75,0.5);} 50%{ box-shadow:0 0 0 8px rgba(201,162,75,0);} }
+  .tool.pulse { animation: toolpulse 1.2s infinite; border-color: var(--accent); }
 
   /* Case file sidebar */
   #casefile {
@@ -366,6 +368,34 @@
   }
   .fade-black.show { opacity:1; pointer-events:auto; }
 
+  /* Lab instruction banner */
+  #labStep {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(8,10,14,0.9);
+    border: 1px solid var(--accent);
+    color: var(--ink);
+    padding: 10px 18px; border-radius: 6px;
+    font-size: 14px; z-index: 31; text-align: center;
+    max-width: 88%; line-height: 1.4;
+    display: none;
+  }
+  #labStep.show { display: block; }
+  #labStep b { color: var(--accent); }
+
+  /* CTE confirmed flash */
+  #labConfirm {
+    position: absolute; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(4,8,14,0.55); z-index: 40;
+  }
+  #labConfirm.show { display: flex; }
+  #labConfirm .lc-inner { text-align: center; }
+  #labConfirm .lc-title {
+    font-size: clamp(28px,7vw,48px); letter-spacing: 4px; color: var(--truth);
+    text-shadow: 0 0 30px rgba(74,163,223,0.6);
+  }
+  #labConfirm .lc-sub { color: var(--ink); margin-top: 10px; font-style: italic; font-size: 15px; }
+
   .hidden { display:none !important; }
 
   @media (max-width: 620px) {
@@ -436,6 +466,8 @@
     <!-- LAB -->
     <div id="lab" class="layer">
       <canvas id="labCanvas"></canvas>
+      <div id="labStep"></div>
+      <div id="labConfirm"><div class="lc-inner"><div class="lc-title">CTE CONFIRMED</div><div class="lc-sub" id="lcSub"></div></div></div>
       <div id="prayer"><p id="prayerText"></p></div>
     </div>
 
@@ -507,6 +539,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script>
 "use strict";
@@ -790,33 +823,162 @@ $('introNext').onclick = ()=>{
 // ---------------------------------------------------------------------------
 // PHASE 1 — THE FIELD
 // ---------------------------------------------------------------------------
+// Brawl-Stars-style angled 3D field via Three.js, with a 2D canvas fallback.
 const fieldCanvas = $('fieldCanvas');
-const fctx = fieldCanvas.getContext('2d');
+const HAS_3D = (typeof THREE !== 'undefined');
+// A canvas can hold only one context type. Only grab 2D when we won't use WebGL.
+const fctx = HAS_3D ? null : fieldCanvas.getContext('2d');
+
+// Movement model is shared by both renderers:
+//   player.x  = lateral position  (-LANE .. +LANE)
+//   player.z  = forward position  (decreases as you run upfield)
+//   defenders move toward the player in +z and steer toward player.x
+const LANE = 9;
 const Field = {
-  active: false,
-  round: 0,
-  timeLeft: 30,
-  lastTs: 0,
-  shake: 0,
-  player: null,
-  defenders: [],
-  yards: 0,
-  hits: 0,
-  scrollY: 0,
-  spawnTimer: 0,
-  trucking: false,
-  invuln: 0,
-  flash: 0,
-  raf: null,
+  active:false, round:0, timeLeft:30, lastTs:0,
+  shake:0, flash:0, invuln:0, trucking:false, truckHeld:false,
+  yards:0, hits:0, spawnTimer:0, raf:null,
+  player:null, defenders:[],
+  speed:14,            // forward units/sec
+  lateral:11,          // lateral units/sec
+  bob:0,
+  three:null,          // three.js scene container
 };
 const keys = {};
 const touchDir = { up:false, down:false, left:false, right:false };
 
+// ---- Three.js scene -------------------------------------------------------
+function makeFigure(color, isDefender){
+  const g = new THREE.Group();
+  const cloth = new THREE.MeshStandardMaterial({ color, roughness:0.7, metalness:0.05 });
+  const skin = new THREE.MeshStandardMaterial({ color:0x6b4a32, roughness:0.9 });
+  const helmetMat = new THREE.MeshStandardMaterial({ color, roughness:0.35, metalness:0.4 });
+  // torso (shoulder pads look — wider top)
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.5,1.5,12), cloth);
+  torso.position.y = 1.5; torso.castShadow = true; g.add(torso);
+  const pads = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.5,0.9), cloth);
+  pads.position.y = 2.15; pads.castShadow = true; g.add(pads);
+  // head + helmet
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.36,16,16), skin);
+  head.position.y = 2.55; g.add(head);
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.42,16,16,0,Math.PI*2,0,Math.PI*0.62), helmetMat);
+  helmet.position.y = 2.62; helmet.castShadow = true; g.add(helmet);
+  // arms
+  const armGeo = new THREE.CylinderGeometry(0.16,0.16,1.1,8);
+  const armL = new THREE.Mesh(armGeo, cloth); armL.position.set(-0.78,1.6,0); g.add(armL);
+  const armR = new THREE.Mesh(armGeo, cloth); armR.position.set(0.78,1.6,0); g.add(armR);
+  // legs (animated)
+  const legGeo = new THREE.CylinderGeometry(0.22,0.18,1.2,8);
+  const legL = new THREE.Mesh(legGeo, cloth); legL.position.set(-0.28,0.6,0); legL.castShadow=true; g.add(legL);
+  const legR = new THREE.Mesh(legGeo, cloth); legR.position.set(0.28,0.6,0); legR.castShadow=true; g.add(legR);
+  g.userData = { legL, legR, armL, armR, torso, baseColor:color };
+  return g;
+}
+
+function initThree(){
+  if (!HAS_3D || Field.three) return;
+  const renderer = new THREE.WebGLRenderer({ canvas: fieldCanvas, antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0c10);
+  scene.fog = new THREE.Fog(0x0a0c10, 38, 78);
+
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
+
+  scene.add(new THREE.AmbientLight(0xb9c6d6, 0.7));
+  const sun = new THREE.DirectionalLight(0xfff2dd, 1.15);
+  sun.position.set(-12, 26, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024,1024);
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 80;
+  sun.shadow.camera.left = -20; sun.shadow.camera.right = 20;
+  sun.shadow.camera.top = 20; sun.shadow.camera.bottom = -40;
+  scene.add(sun);
+
+  // turf
+  const turf = new THREE.Mesh(
+    new THREE.PlaneGeometry(26, 600),
+    new THREE.MeshStandardMaterial({ color:0x1f6a32, roughness:1 })
+  );
+  turf.rotation.x = -Math.PI/2; turf.position.z = -260; turf.receiveShadow = true;
+  scene.add(turf);
+  // mowed stripes
+  for (let i=0;i<60;i++){
+    const stripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(26, 5),
+      new THREE.MeshStandardMaterial({ color: i%2? 0x238038 : 0x1c602e, roughness:1 })
+    );
+    stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.01, -i*10); stripe.receiveShadow = true;
+    scene.add(stripe);
+  }
+  // yard lines (recycled)
+  const yardLines = [];
+  const lineMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.55 });
+  for (let i=0;i<60;i++){
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(24, 0.3), lineMat);
+    line.rotation.x = -Math.PI/2; line.position.set(0,0.02,-i*10);
+    scene.add(line); yardLines.push(line);
+  }
+  // sidelines
+  [-12.6,12.6].forEach(x=>{
+    const sl = new THREE.Mesh(new THREE.PlaneGeometry(0.5,600), lineMat);
+    sl.rotation.x = -Math.PI/2; sl.position.set(x,0.02,-260); scene.add(sl);
+  });
+  // stadium stands (simple tiered boxes) + crowd speckle
+  function stand(x){
+    const grp = new THREE.Group();
+    for (let t=0;t<3;t++){
+      const tier = new THREE.Mesh(
+        new THREE.BoxGeometry(6, 2+t*1.4, 560),
+        new THREE.MeshStandardMaterial({ color:0x141821, roughness:1 })
+      );
+      tier.position.set(x + Math.sign(x)*t*3, 1+t*1.2, -250);
+      grp.add(tier);
+    }
+    // crowd dots
+    const dotGeo = new THREE.SphereGeometry(0.22,6,6);
+    for (let i=0;i<240;i++){
+      const c = new THREE.Color().setHSL(Math.random(),0.5,0.45+Math.random()*0.2);
+      const dot = new THREE.Mesh(dotGeo, new THREE.MeshStandardMaterial({color:c}));
+      dot.position.set(x + Math.sign(x)*(1+Math.random()*7), 2.5+Math.random()*4, -10 - Math.random()*540);
+      grp.add(dot);
+    }
+    return grp;
+  }
+  scene.add(stand(-15.5)); scene.add(stand(15.5));
+
+  const playerMesh = makeFigure(0xc9a24b, false);
+  scene.add(playerMesh);
+
+  Field.three = { renderer, scene, camera, sun, yardLines, playerMesh, defenderMeshes:[], turf };
+  resizeThree();
+}
+
+function resizeThree(){
+  if (!Field.three) return;
+  const r = fieldCanvas.getBoundingClientRect();
+  if (!r.width) return;
+  Field.three.renderer.setSize(r.width, r.height, false);
+  Field.three.camera.aspect = r.width / r.height;
+  Field.three.camera.updateProjectionMatrix();
+}
+
+function makeDefenderMesh(){
+  const m = makeFigure(0x2b2f3a, true);
+  Field.three.scene.add(m);
+  return m;
+}
+
+// ---- phase / round flow ---------------------------------------------------
 function beginFieldPhase(){
   G.round = 0;
   fadeOut(()=>{
     show('field');
     fadeIn();
+    if (HAS_3D){ initThree(); resizeThree(); }
     Audio.phase('field');
     titleCard("Three Sundays. Three Men.", "The League · 1998 – 2008", 1800, ()=>{
       startFieldRound(0);
@@ -825,37 +987,52 @@ function beginFieldPhase(){
 }
 
 function startFieldRound(idx){
-  resizeCanvas(fieldCanvas);
+  if (HAS_3D){ resizeThree(); } else { resizeCanvas(fieldCanvas); }
   Field.round = idx;
   Field.timeLeft = 30;
   Field.yards = 0;
   Field.hits = 0;
-  Field.scrollY = 0;
   Field.shake = 0;
-  Field.spawnTimer = 0;
-  Field.invuln = 1.0;
   Field.flash = 0;
+  Field.invuln = 1.2;
+  Field.spawnTimer = 0.6;
+  Field.bob = 0;
   Field.defenders = [];
-  Field.player = { x: fieldCanvas.width/2, y: fieldCanvas.height*0.72, r: 14, vx:0, vy:0, speed: 200 };
+  Field.player = { x:0, z:0, vx:0 };
   Field.active = true;
+
   const p = PLAYERS[idx];
-  // speed/feel per style
-  if (p.style==='fast') Field.player.speed = 250;
-  if (p.style==='hard') Field.player.speed = 175;
-  if (p.style==='workhorse') Field.player.speed = 200;
+  Field.speed = p.style==='fast' ? 17 : p.style==='hard' ? 12.5 : 14.5;
+  Field.lateral = p.style==='fast' ? 13 : p.style==='hard' ? 9 : 11;
+
+  // recolor player + clear old defender meshes
+  if (HAS_3D && Field.three){
+    recolorFigure(Field.three.playerMesh, p.color);
+    Field.three.playerMesh.position.set(0,0,0);
+    Field.three.defenderMeshes.forEach(m=> m.visible=false);
+  }
 
   $('hud').classList.remove('hidden');
   G.pausable = true;
   updateFieldHud();
-
   if (isTouch()) $('touchpad').classList.add('show');
 
   if (idx===0){
-    showHint("Arrow keys / WASD to run. Reach the end zone. Hold SHIFT (or TRUCK) to bulldoze defenders — more yards, more damage.");
+    showHint("◀ ▶ to dodge, ▲ to burst. You run upfield automatically. Hold SHIFT or TRUCK to bulldoze tacklers — more yards, but more damage.");
   }
   Field.lastTs = performance.now();
   cancelAnimationFrame(Field.raf);
   loopField(Field.lastTs);
+}
+
+function recolorFigure(g, hex){
+  const col = new THREE.Color(hex);
+  g.traverse(o=>{
+    if (o.isMesh && o.material && o.material.color && o.material.metalness !== undefined){
+      // only the cloth/helmet (skin is non-metal handled separately by roughness 0.9)
+      if (o.material.roughness <= 0.7) o.material.color.copy(col);
+    }
+  });
 }
 
 function updateFieldHud(){
@@ -865,16 +1042,14 @@ function updateFieldHud(){
 }
 
 function spawnDefender(){
-  const w = fieldCanvas.width;
-  const lane = Math.random()*w;
-  const speed = 60 + Math.random()*70 + Field.round*15;
+  const speed = 7 + Math.random()*5 + Field.round*1.4;   // closing speed
   Field.defenders.push({
-    x: lane,
-    y: -30 - Math.random()*80,
-    r: 13,
-    vx: (Math.random()-0.5)*40,
-    speed: speed,
-    hit: false,
+    x: (Math.random()*2-1)*LANE,
+    z: Field.player.z - 38 - Math.random()*16,
+    speed,
+    steer: 1.6 + Math.random()*1.4,
+    hit:false, gone:false,
+    mesh:null,
   });
 }
 
@@ -882,10 +1057,8 @@ function loopField(ts){
   if (!Field.active) return;
   const dt = Math.min(0.05, (ts - Field.lastTs)/1000);
   Field.lastTs = ts;
-  if (!G.paused){
-    updateField(dt);
-  }
-  renderField();
+  if (!G.paused) updateField(dt);
+  if (HAS_3D && Field.three) renderField3D(dt); else renderField2D();
   Field.raf = requestAnimationFrame(loopField);
 }
 
@@ -894,131 +1067,156 @@ function updateField(dt){
   Field.invuln = Math.max(0, Field.invuln - dt);
   Field.flash = Math.max(0, Field.flash - dt*3);
   Field.shake *= 0.86;
+  Field.bob += dt*12;
 
   const p = Field.player;
-  // input
-  let ix=0, iy=0;
-  if (keys['ArrowUp']||keys['w']||touchDir.up) iy-=1;
-  if (keys['ArrowDown']||keys['s']||touchDir.down) iy+=1;
-  if (keys['ArrowLeft']||keys['a']||touchDir.left) ix-=1;
-  if (keys['ArrowRight']||keys['d']||touchDir.right) ix+=1;
+  let ix = 0;
+  if (keys['ArrowLeft']||keys['a']||touchDir.left) ix -= 1;
+  if (keys['ArrowRight']||keys['d']||touchDir.right) ix += 1;
   const trucking = (keys['Shift']||Field.truckHeld);
   Field.trucking = trucking;
-  const spd = p.speed * (trucking?0.78:1);
-  const len = Math.hypot(ix,iy)||1;
-  p.x += (ix/len)*spd*dt;
-  p.y += (iy/len)*spd*dt;
-  // auto forward progress (running upfield)
-  const forward = (60 + (trucking?20:0)) * dt; // base advance
-  Field.yards += forward * 0.5;
-  Field.scrollY += forward * 2.2;
 
-  p.x = Math.max(p.r, Math.min(fieldCanvas.width-p.r, p.x));
-  p.y = Math.max(fieldCanvas.height*0.25, Math.min(fieldCanvas.height-p.r, p.y));
+  p.x += ix * Field.lateral * dt;
+  p.x = Math.max(-LANE, Math.min(LANE, p.x));
 
-  // spawn
+  let pace = 1;
+  if (keys['ArrowUp']||keys['w']||touchDir.up) pace = 1.35;       // burst
+  if (keys['ArrowDown']||keys['s']||touchDir.down) pace = 0.6;    // ease up
+  const fwd = Field.speed * pace * (trucking?0.82:1);
+  p.z -= fwd * dt;
+  Field.yards += fwd * dt * 0.55;
+
+  // spawn defenders
   Field.spawnTimer -= dt;
-  const rate = 0.55 - Field.round*0.05;
-  if (Field.spawnTimer<=0){
-    spawnDefender();
-    Field.spawnTimer = rate + Math.random()*0.4;
-  }
+  const rate = Math.max(0.32, 0.62 - Field.round*0.06);
+  if (Field.spawnTimer<=0){ spawnDefender(); Field.spawnTimer = rate + Math.random()*0.35; }
 
-  // update defenders
   for (const d of Field.defenders){
-    // move toward player a bit + downward scroll
     const dx = p.x - d.x;
-    d.x += Math.sign(dx)*Math.min(Math.abs(dx), d.speed*0.4*dt) + d.vx*dt;
-    d.y += d.speed*dt + Field.scrollSpeed(dt);
-    // collision
-    if (!d.hit && Math.hypot(d.x-p.x, d.y-p.y) < d.r+p.r){
+    d.x += Math.sign(dx)*Math.min(Math.abs(dx), d.steer*dt);
+    d.z += (d.speed + fwd) * dt;       // closes the gap as player runs in
+    if (!d.hit && Math.abs(d.z - p.z) < 1.3 && Math.abs(d.x - p.x) < 1.3){
       handleTackle(d);
     }
+    if (d.z > p.z + 6) d.gone = true;  // ran past behind the player
   }
-  Field.defenders = Field.defenders.filter(d=> d.y < fieldCanvas.height+40 && !d.gone);
+  Field.defenders = Field.defenders.filter(d=> !d.gone);
 
   updateFieldHud();
-
-  if (Field.timeLeft <= 0){
-    endFieldRound();
-  }
+  if (Field.timeLeft <= 0) endFieldRound();
 }
-Field.scrollSpeed = (dt)=> 90*dt;
 
 function handleTackle(d){
   const p = PLAYERS[Field.round];
+  d.hit = true; d.gone = true;
+  Field.hits++;
   if (Field.trucking){
-    // truck through: push past, gain yards, take MORE impact
-    d.gone = true;
-    d.hit = true;
-    Field.hits++;
     careers[Field.round].impact += (p.style==='hard'?14:11);
     Field.yards += 8;
-    Field.shake = 16;
-    Field.flash = 1;
+    Field.shake = 0.9; Field.flash = 1;
     Audio.sfxHit(2);
   } else {
-    if (Field.invuln>0) return;
-    // tackled: get hit, lose a little, knockback
-    d.gone = true;
-    d.hit = true;
-    Field.hits++;
+    if (Field.invuln>0){ d.hit=false; d.gone=true; return; }
     careers[Field.round].impact += (p.style==='hard'?9:7);
-    Field.invuln = 0.9;
-    Field.shake = 12;
-    Field.flash = 0.8;
-    // knock back
-    Field.player.y += 26;
+    Field.invuln = 0.85;
+    Field.shake = 0.7; Field.flash = 0.8;
+    Field.player.z += 2.2;             // knocked back
     Audio.sfxHit(1);
   }
 }
 
-function renderField(){
-  const w = fieldCanvas.width, h = fieldCanvas.height;
-  fctx.save();
-  // screen shake
-  if (Field.shake>0.3){
-    fctx.translate((Math.random()-0.5)*Field.shake, (Math.random()-0.5)*Field.shake);
-  }
-  // field
-  fctx.fillStyle = "#1d3b22"; fctx.fillRect(-20,-20,w+40,h+40);
-  // yard lines scrolling
-  fctx.strokeStyle = "rgba(255,255,255,0.18)"; fctx.lineWidth=3;
-  const off = (Field.scrollY % 80);
-  for (let y=-80; y<h+80; y+=80){
-    const yy = y + off;
-    fctx.beginPath(); fctx.moveTo(0,yy); fctx.lineTo(w,yy); fctx.stroke();
-  }
-  // sideline shading
-  fctx.fillStyle="rgba(255,255,255,0.04)"; fctx.fillRect(0,0,18,h); fctx.fillRect(w-18,0,18,h);
+// ---- 3D rendering ---------------------------------------------------------
+function animateLegs(g, t, running){
+  if (!g.userData.legL) return;
+  const sw = running ? Math.sin(t)*0.6 : 0;
+  g.userData.legL.rotation.x = sw;
+  g.userData.legR.rotation.x = -sw;
+  g.userData.armL.rotation.x = -sw;
+  g.userData.armR.rotation.x = sw;
+}
 
-  // end zone hint near top
+function renderField3D(dt){
+  const T = Field.three;
+  const p = Field.player;
+
+  // player mesh
+  const blink = (Field.invuln>0 && Math.floor(Field.invuln*14)%2===0);
+  T.playerMesh.visible = !blink;
+  T.playerMesh.position.x = p.x;
+  T.playerMesh.position.z = p.z;
+  T.playerMesh.rotation.x = Field.trucking ? 0.25 : 0.05;  // lean when trucking
+  recolorFigure(T.playerMesh, Field.trucking ? 0xd9534f : PLAYERS[Field.round].color);
+  animateLegs(T.playerMesh, Field.bob, true);
+
+  // defenders -> meshes (pool)
+  let mi = 0;
+  for (const d of Field.defenders){
+    let m = T.defenderMeshes[mi];
+    if (!m){ m = makeDefenderMesh(); T.defenderMeshes[mi] = m; }
+    m.visible = true;
+    m.position.set(d.x, 0, d.z);
+    m.rotation.y = Math.PI;          // facing the runner
+    animateLegs(m, Field.bob*0.9 + mi, true);
+    mi++;
+  }
+  for (; mi < T.defenderMeshes.length; mi++) T.defenderMeshes[mi].visible = false;
+
+  // recycle yard lines around the player
+  const span = T.yardLines.length*10;
+  for (const line of T.yardLines){
+    while (line.position.z > p.z + 12) line.position.z -= span;
+    while (line.position.z < p.z - span + 12) line.position.z += span;
+  }
+
+  // camera: high, slightly behind, Brawl-Stars angle
+  const shx = (Math.random()-0.5)*Field.shake;
+  const shy = (Math.random()-0.5)*Field.shake;
+  T.camera.position.set(p.x*0.45 + shx, 13 + shy, p.z + 13);
+  T.camera.lookAt(p.x*0.25, 1.6, p.z - 9);
+
+  // flash overlay via fog/background tint
+  T.renderer.render(T.scene, T.camera);
+
+  // 2D flash on top of the webgl canvas isn't possible on same canvas;
+  // emulate by briefly lightening background
+  if (Field.flash>0){
+    T.scene.background.setRGB(0.04+Field.flash*0.5, 0.05+Field.flash*0.5, 0.06+Field.flash*0.5);
+  } else {
+    T.scene.background.setHex(0x0a0c10);
+  }
+}
+
+// ---- 2D fallback rendering ------------------------------------------------
+function renderField2D(){
+  const w = fieldCanvas.width, h = fieldCanvas.height;
+  const p = Field.player;
+  const cx = w/2, baseY = h*0.74;
+  const scaleX = w/(LANE*2.4);
+  const depth = 9;            // px per forward unit
+  fctx.save();
+  if (Field.shake>0.05) fctx.translate((Math.random()-0.5)*Field.shake*18,(Math.random()-0.5)*Field.shake*18);
+  fctx.fillStyle = "#1d5a2a"; fctx.fillRect(-30,-30,w+60,h+60);
+  fctx.strokeStyle="rgba(255,255,255,0.18)"; fctx.lineWidth=3;
+  const off = ((-p.z*depth)%80);
+  for (let y=-80;y<h+80;y+=80){ const yy=y+off; fctx.beginPath();fctx.moveTo(0,yy);fctx.lineTo(w,yy);fctx.stroke(); }
+  fctx.fillStyle="rgba(0,0,0,0.05)"; fctx.fillRect(0,0,14,h); fctx.fillRect(w-14,0,14,h);
   // defenders
   for (const d of Field.defenders){
-    fctx.fillStyle = "#2b2f38";
-    fctx.beginPath(); fctx.arc(d.x,d.y,d.r,0,Math.PI*2); fctx.fill();
-    fctx.fillStyle = "#c0c4cc";
-    fctx.fillRect(d.x-5, d.y-3, 10, 6);
+    const sx = cx + d.x*scaleX;
+    const sy = baseY - (p.z - d.z)*depth;
+    if (sy<-30||sy>h+30) continue;
+    fctx.fillStyle="#2b2f3a"; fctx.beginPath(); fctx.arc(sx,sy,15,0,Math.PI*2); fctx.fill();
+    fctx.fillStyle="#c0c4cc"; fctx.fillRect(sx-6,sy-4,12,8);
   }
   // player
-  const p = Field.player;
-  const col = PLAYERS[Field.round].color;
-  if (Field.invuln>0 && Math.floor(Field.invuln*12)%2===0){
-    fctx.globalAlpha = 0.5;
+  const blink = (Field.invuln>0 && Math.floor(Field.invuln*14)%2===0);
+  if (!blink){
+    fctx.fillStyle = Field.trucking ? "#d9534f" : PLAYERS[Field.round].color;
+    fctx.beginPath(); fctx.arc(cx+p.x*scaleX, baseY, 16, 0, Math.PI*2); fctx.fill();
+    fctx.fillStyle="#fff"; fctx.fillRect(cx+p.x*scaleX-6, baseY-4, 12, 8);
   }
-  fctx.fillStyle = Field.trucking ? "#d9534f" : col;
-  fctx.beginPath(); fctx.arc(p.x,p.y,p.r,0,Math.PI*2); fctx.fill();
-  fctx.fillStyle="#fff"; fctx.fillRect(p.x-5,p.y-3,10,6);
-  fctx.globalAlpha=1;
-
   fctx.restore();
-
-  // impact flash
-  if (Field.flash>0){
-    fctx.fillStyle = `rgba(255,255,255,${Field.flash*0.4})`;
-    fctx.fillRect(0,0,w,h);
-  }
-  // crowd vignette top
+  if (Field.flash>0){ fctx.fillStyle=`rgba(255,255,255,${Field.flash*0.4})`; fctx.fillRect(0,0,w,h); }
   const vg = fctx.createLinearGradient(0,0,0,h*0.25);
   vg.addColorStop(0,"rgba(0,0,0,0.45)"); vg.addColorStop(1,"rgba(0,0,0,0)");
   fctx.fillStyle=vg; fctx.fillRect(0,0,w,h*0.25);
@@ -1079,22 +1277,17 @@ $('careerNext').onclick = ()=>{
 // ---------------------------------------------------------------------------
 // PHASE 2 — THE LAB
 // ---------------------------------------------------------------------------
+// Redesigned for clarity: a guided two-step microscope task.
+//   Step 1 — APPLY THE STAIN (button pulses; deposits are invisible until then)
+//   Step 2 — TAP each highlighted tau deposit until enough are logged.
 const labCanvas = $('labCanvas');
 const lctx = labCanvas.getContext('2d');
 const Lab = {
-  active:false,
-  index:0,
-  spots:[],          // {x,y,r,found}
-  needed:0,
-  found:0,
-  cam:{x:0,y:0,zoom:1},
-  drag:null,
-  stain:false,
-  mag:true,
+  active:false, index:0,
+  spots:[], needed:0, found:0,
+  stain:false, step:1,
   cursor:{x:0,y:0,active:false},
-  tissueSeed:0,
-  raf:null,
-  startTime:0,
+  tissueSeed:0, t:0, raf:null,
 };
 
 function beginLabPhase(){
@@ -1102,7 +1295,6 @@ function beginLabPhase(){
     show('lab'); fadeIn();
     Audio.phase('lab');
     titleCard("Pittsburgh, 2009", "Allegheny County Coroner's Office", 2000, ()=>{
-      // one-time prayer moment
       doPrayer(()=> startLabInvestigation(0));
     });
   });
@@ -1130,20 +1322,21 @@ function startLabInvestigation(idx){
   Lab.active = true;
   Lab.found = 0;
   Lab.stain = false;
-  Lab.mag = true;
-  Lab.cam = {x:0,y:0,zoom:1};
+  Lab.step = 1;
+  Lab.t = 0;
   Lab.tissueSeed = 1000 + idx*777;
-  // spots count scales with impact score from phase 1
+
+  // more impact in Phase 1 -> more deposits to find
   const impact = careers[idx].impact;
-  const base = 4;
-  Lab.totalSpots = base + Math.round(impact/22); // more impact, more deposits
-  Lab.needed = Math.max(3, Math.round(Lab.totalSpots*0.6));
+  Lab.totalSpots = 5 + Math.round(impact/24);
+  Lab.needed = Math.min(Lab.totalSpots, 4 + Math.round(impact/40));
   Lab.spots = [];
+  const W = labCanvas.width, H = labCanvas.height;
   for (let i=0;i<Lab.totalSpots;i++){
     Lab.spots.push({
-      x: 80 + Math.random()*(labCanvas.width-160),
-      y: 90 + Math.random()*(labCanvas.height-180),
-      r: 7 + Math.random()*6,
+      x: W*0.18 + Math.random()*W*0.64,
+      y: H*0.22 + Math.random()*H*0.56,
+      r: 11 + Math.random()*7,
       found:false,
     });
   }
@@ -1151,39 +1344,50 @@ function startLabInvestigation(idx){
   $('labprog').classList.remove('hidden');
   $('labtools').classList.remove('hidden');
   $('casefile').classList.remove('hidden');
+  $('labStep').classList.add('show');
   $('hud').classList.add('hidden');
   G.pausable = true;
-  $('toolStain').textContent = "Stain: OFF";
+
+  $('toolStain').textContent = "Apply Stain";
   $('toolStain').classList.remove('on');
+  $('toolStain').classList.add('pulse');
   $('toolMag').textContent = "Magnifier: ON";
   $('toolMag').classList.add('on');
+  Lab.mag = true;
 
   updateLabProg();
+  updateLabStep();
   buildCaseFile();
+  hideHint();
 
-  if (idx===0){
-    showHint("Drag to pan the slide. Tap a dark tau deposit to log it. Toggle the STAIN to reveal faint ones. Find enough to confirm the case.");
-  }
-  Lab.startTime = performance.now();
   cancelAnimationFrame(Lab.raf);
   loopLab();
 }
 
+function updateLabStep(){
+  const p = PLAYERS[Lab.index];
+  const name = p.name.split(' ').slice(-1)[0];
+  if (Lab.step===1){
+    $('labStep').innerHTML = `Brain tissue of <b>${name}</b>. Step 1 of 2 — press <b>Apply Stain</b> (below) to reveal the proteins.`;
+  } else {
+    $('labStep').innerHTML = `Step 2 of 2 — tap each <b>dark tau deposit</b> (ringed in gold). Log <b>${Lab.needed}</b> to confirm the diagnosis.`;
+  }
+}
+
 function updateLabProg(){
-  $('labprogText').textContent = `Tau deposits: ${Lab.found} / ${Lab.needed}`;
+  $('labprogText').textContent = `Tau deposits logged: ${Lab.found} / ${Lab.needed}`;
   $('labprogBar').style.width = Math.min(100, (Lab.found/Lab.needed)*100)+"%";
 }
 
 function buildCaseFile(){
-  // case file shows the 3 players; current one being analyzed
   let html = '';
   PLAYERS.forEach((p,i)=>{
-    const done = i < Lab.index || (i===Lab.index);
+    const done = i <= Lab.index;
     const analyzed = i < Lab.index;
     html += `<div class="cfrow ${done?'found':''}" id="cf${i}">
       ${geoPortrait(p.color, 3)}
       <div class="cftxt">
-        <b>${p.name.split("'").pop().trim().split(' ').slice(-1)[0]||p.name}</b>
+        <b>${p.name.split(' ').slice(-1)[0]}</b>
         <span>${p.pos}<br>${analyzed?'CTE confirmed':(i===Lab.index?'Examining…':'Pending')}</span>
       </div>
     </div>`;
@@ -1193,7 +1397,7 @@ function buildCaseFile(){
 
 function loopLab(){
   if (!Lab.active) return;
-  if (!G.paused) renderLab();
+  if (!G.paused){ Lab.t += 0.05; renderLab(); }
   Lab.raf = requestAnimationFrame(loopLab);
 }
 
@@ -1201,111 +1405,107 @@ function renderLab(){
   const w = labCanvas.width, h = labCanvas.height;
   lctx.fillStyle = "#0a0709"; lctx.fillRect(0,0,w,h);
 
-  lctx.save();
-  lctx.translate(Lab.cam.x, Lab.cam.y);
-  lctx.scale(Lab.cam.zoom, Lab.cam.zoom);
-
-  // tissue background — pinkish stained brain tissue, procedural
-  lctx.fillStyle = Lab.stain ? "#3a2230" : "#2a1c24";
-  lctx.fillRect(-50,-50,w+100,h+100);
-  // fibrous texture
+  // procedural tissue
+  lctx.fillStyle = Lab.stain ? "#42283a" : "#2a1c24";
+  lctx.fillRect(0,0,w,h);
   let s = Lab.tissueSeed;
   const rnd = ()=>{ s=(s*9301+49297)%233280; return s/233280; };
-  lctx.globalAlpha = 0.5;
-  for (let i=0;i<160;i++){
-    const x=rnd()*w, y=rnd()*h, r=4+rnd()*18;
+  lctx.globalAlpha = 0.55;
+  for (let i=0;i<170;i++){
+    const x=rnd()*w, y=rnd()*h, r=5+rnd()*20;
     lctx.fillStyle = Lab.stain
-      ? `rgba(${150+rnd()*60},${90+rnd()*40},${120+rnd()*40},0.25)`
-      : `rgba(${120+rnd()*50},${80+rnd()*30},${95+rnd()*30},0.25)`;
+      ? `rgba(${160+rnd()*60},${95+rnd()*40},${130+rnd()*40},0.22)`
+      : `rgba(${120+rnd()*50},${80+rnd()*30},${95+rnd()*30},0.22)`;
     lctx.beginPath(); lctx.arc(x,y,r,0,Math.PI*2); lctx.fill();
   }
   lctx.globalAlpha = 1;
 
-  // tau spots
+  // tau deposits
+  const pulse = 0.5 + 0.5*Math.sin(Lab.t*3);
   for (const sp of Lab.spots){
     if (sp.found){
-      lctx.strokeStyle = "#4aa3df"; lctx.lineWidth = 3/Lab.cam.zoom;
-      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r+6,0,Math.PI*2); lctx.stroke();
-      lctx.fillStyle = "rgba(74,163,223,0.25)";
+      lctx.fillStyle = "rgba(74,163,223,0.3)";
       lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r,0,Math.PI*2); lctx.fill();
-    } else {
-      // visibility depends on stain
-      const vis = Lab.stain ? 0.85 : 0.32;
-      lctx.fillStyle = `rgba(40,18,30,${vis})`;
+      lctx.strokeStyle = "#4aa3df"; lctx.lineWidth = 3;
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r+7,0,Math.PI*2); lctx.stroke();
+      // check mark
+      lctx.strokeStyle="#9fd0f2"; lctx.lineWidth=3;
+      lctx.beginPath(); lctx.moveTo(sp.x-5,sp.y); lctx.lineTo(sp.x-1,sp.y+5); lctx.lineTo(sp.x+6,sp.y-5); lctx.stroke();
+    } else if (Lab.stain){
+      // dark deposit, clearly visible
+      lctx.fillStyle = "rgba(30,10,22,0.92)";
       lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r,0,Math.PI*2); lctx.fill();
-      if (Lab.stain){
-        lctx.fillStyle = "rgba(90,30,60,0.7)";
-        lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r*0.55,0,Math.PI*2); lctx.fill();
-      }
+      lctx.fillStyle = "rgba(120,30,70,0.85)";
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r*0.55,0,Math.PI*2); lctx.fill();
+      // pulsing gold "tap me" ring
+      lctx.strokeStyle = `rgba(201,162,75,${0.4+0.5*pulse})`;
+      lctx.lineWidth = 2.5;
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r+6+pulse*4,0,Math.PI*2); lctx.stroke();
     }
+    // when stain is OFF, deposits are hidden (that's the teaching point)
   }
-  lctx.restore();
 
   // microscope vignette
-  const grd = lctx.createRadialGradient(w/2,h/2,h*0.2,w/2,h/2,h*0.7);
+  const grd = lctx.createRadialGradient(w/2,h/2,h*0.18,w/2,h/2,h*0.72);
   grd.addColorStop(0,"rgba(0,0,0,0)");
-  grd.addColorStop(1,"rgba(0,0,0,0.85)");
+  grd.addColorStop(1,"rgba(0,0,0,0.8)");
   lctx.fillStyle=grd; lctx.fillRect(0,0,w,h);
 
-  // magnifier lens at cursor
+  // magnifier lens
   if (Lab.mag && Lab.cursor.active){
     lctx.save();
-    lctx.beginPath();
-    lctx.arc(Lab.cursor.x, Lab.cursor.y, 56, 0, Math.PI*2);
+    lctx.beginPath(); lctx.arc(Lab.cursor.x, Lab.cursor.y, 52, 0, Math.PI*2);
     lctx.strokeStyle="rgba(201,162,75,0.7)"; lctx.lineWidth=2; lctx.stroke();
-    lctx.clip();
-    lctx.fillStyle="rgba(255,255,255,0.05)";
-    lctx.fillRect(Lab.cursor.x-56,Lab.cursor.y-56,112,112);
     lctx.restore();
   }
 }
 
-// lab interaction: screen->world
-function labWorld(px,py){
-  return { x:(px-Lab.cam.x)/Lab.cam.zoom, y:(py-Lab.cam.y)/Lab.cam.zoom };
-}
 function labTap(px,py){
-  const wpt = labWorld(px,py);
+  if (!Lab.active) return;
+  if (!Lab.stain){
+    showHint("Press “Apply Stain” first — the proteins are invisible without it.");
+    return;
+  }
   for (const sp of Lab.spots){
     if (sp.found) continue;
-    if (Math.hypot(sp.x-wpt.x, sp.y-wpt.y) < sp.r+14/Lab.cam.zoom){
-      // only findable if stain on OR it's a "visible" one
+    if (Math.hypot(sp.x-px, sp.y-py) < sp.r+18){
       sp.found = true;
       Lab.found++;
       Audio.sfxDing();
       updateLabProg();
-      if (Lab.found >= Lab.needed){
-        setTimeout(finishLabInvestigation, 500);
-      }
+      if (Lab.found >= Lab.needed){ setTimeout(confirmDiagnosis, 350); }
       return;
     }
   }
 }
 
-function finishLabInvestigation(){
+function confirmDiagnosis(){
   if (!Lab.active) return;
   Lab.active = false;
   cancelAnimationFrame(Lab.raf);
-  // mark found
-  const cf = $('cf'+Lab.index);
-  if (cf) cf.classList.add('found');
-
-  if (Lab.index >= 2){
-    $('labprog').classList.add('hidden');
-    $('labtools').classList.add('hidden');
-    hideHint();
-    fadeOut(()=>{
-      $('casefile').classList.add('hidden');
-      beginPushbackPhase();
-    });
-  } else {
-    fadeOut(()=>{
-      titleCardImmediate();
-      startLabInvestigation(Lab.index+1);
-      fadeIn();
-    });
-  }
+  const cf = $('cf'+Lab.index); if (cf) cf.classList.add('found');
+  $('labStep').classList.remove('show');
+  const p = PLAYERS[Lab.index];
+  $('lcSub').textContent = `${p.name} — chronic traumatic encephalopathy`;
+  $('labConfirm').classList.add('show');
+  Audio.sfxDing();
+  setTimeout(()=>{
+    $('labConfirm').classList.remove('show');
+    if (Lab.index >= 2){
+      $('labprog').classList.add('hidden');
+      $('labtools').classList.add('hidden');
+      hideHint();
+      fadeOut(()=>{ $('casefile').classList.add('hidden'); beginPushbackPhase(); });
+    } else {
+      fadeOut(()=>{
+        titleCardImmediate();
+        startLabInvestigation(Lab.index+1);
+        fadeIn();
+      });
+    }
+  }, 1700);
 }
+
 function titleCardImmediate(){
   const tc = $('titlecard');
   $('tcMain').textContent = LAB_TITLES[Lab.index] || "Pittsburgh";
@@ -1615,25 +1815,15 @@ truckB.addEventListener('touchend', truckOff, {passive:false});
 truckB.addEventListener('mousedown', truckOn);
 truckB.addEventListener('mouseup', truckOff);
 
-// lab pointer
-function labPointerDown(px,py){
-  Lab.drag = { x:px, y:py, camx:Lab.cam.x, camy:Lab.cam.y, moved:false, t:Date.now() };
-  Lab.cursor.x=px; Lab.cursor.y=py; Lab.cursor.active=true;
-}
-function labPointerMove(px,py){
-  Lab.cursor.x=px; Lab.cursor.y=py;
-  if (Lab.drag){
-    const dx=px-Lab.drag.x, dy=py-Lab.drag.y;
-    if (Math.hypot(dx,dy)>6) Lab.drag.moved=true;
-    Lab.cam.x = Lab.drag.camx + dx;
-    Lab.cam.y = Lab.drag.camy + dy;
-  }
-}
+// lab pointer — tap to log a deposit (no panning/zoom; the slide fills the view)
+let labDown = null;
+function labPointerDown(px,py){ labDown = {x:px,y:py,t:Date.now()}; Lab.cursor.x=px; Lab.cursor.y=py; Lab.cursor.active=true; }
+function labPointerMove(px,py){ Lab.cursor.x=px; Lab.cursor.y=py; }
 function labPointerUp(px,py){
-  if (Lab.drag && !Lab.drag.moved && Date.now()-Lab.drag.t < 400){
+  if (labDown && Math.hypot(px-labDown.x,py-labDown.y) < 16 && Date.now()-labDown.t < 500){
     labTap(px,py);
   }
-  Lab.drag = null;
+  labDown = null;
 }
 function getPos(e, canvas){
   const r = canvas.getBoundingClientRect();
@@ -1646,23 +1836,25 @@ window.addEventListener('mouseup', e=>{ if(G.state==='lab'){ const p=getPos(e,la
 labCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); }, {passive:false});
 labCanvas.addEventListener('touchmove', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); }, {passive:false});
 labCanvas.addEventListener('touchend', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerUp(p.x,p.y); }, {passive:false});
-// wheel zoom
-labCanvas.addEventListener('wheel', e=>{
-  if (G.state!=='lab') return;
-  e.preventDefault();
-  const factor = e.deltaY<0 ? 1.12 : 0.89;
-  const p = getPos(e,labCanvas);
-  const before = labWorld(p.x,p.y);
-  Lab.cam.zoom = Math.max(0.6, Math.min(3, Lab.cam.zoom*factor));
-  const after = labWorld(p.x,p.y);
-  Lab.cam.x += (after.x-before.x)*Lab.cam.zoom;
-  Lab.cam.y += (after.y-before.y)*Lab.cam.zoom;
-}, {passive:false});
 
 $('toolStain').onclick = ()=>{
-  Lab.stain = !Lab.stain;
-  $('toolStain').textContent = "Stain: " + (Lab.stain?"ON":"OFF");
-  $('toolStain').classList.toggle('on', Lab.stain);
+  if (!Lab.stain){
+    Lab.stain = true;
+    Lab.step = 2;
+    $('toolStain').textContent = "Stain: ON";
+    $('toolStain').classList.add('on');
+    $('toolStain').classList.remove('pulse');
+    updateLabStep();
+    if (Lab.index===0) showHint("Now tap each dark deposit ringed in gold.");
+    Audio.sfxDing();
+  } else {
+    Lab.stain = false;
+    Lab.step = 1;
+    $('toolStain').textContent = "Apply Stain";
+    $('toolStain').classList.remove('on');
+    $('toolStain').classList.add('pulse');
+    updateLabStep();
+  }
 };
 $('toolMag').onclick = ()=>{
   Lab.mag = !Lab.mag;
@@ -1687,7 +1879,9 @@ function isTouch(){ return ('ontouchstart' in window) || navigator.maxTouchPoint
 if (isTouch()) document.body.classList.add('touch');
 
 function resizeAll(){
-  [titleCanvas, fieldCanvas, labCanvas].forEach(resizeCanvas);
+  [titleCanvas, labCanvas].forEach(resizeCanvas);
+  if (HAS_3D && Field.three){ resizeThree(); }
+  else { resizeCanvas(fieldCanvas); }
 }
 window.addEventListener('resize', resizeAll);
 
