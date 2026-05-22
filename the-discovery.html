@@ -1,0 +1,1703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>The Discovery</title>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #11151c;
+    --ink: #e8e6df;
+    --muted: #8a93a3;
+    --accent: #c9a24b;
+    --truth: #4aa3df;
+    --cred: #c9a24b;
+    --cost: #d9534f;
+    --field: #1d3b22;
+    --field2: #234a2a;
+    --lab: #2a1f2e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-width: 900px;
+    max-height: 100vh;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  /* Layers */
+  .layer {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+  }
+  .layer.active { display: flex; }
+
+  /* Overlay UI */
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    z-index: 50;
+  }
+  h1.title {
+    font-size: clamp(38px, 9vw, 76px);
+    letter-spacing: 4px;
+    margin: 0 0 6px;
+    color: var(--ink);
+    text-shadow: 0 4px 30px rgba(201,162,75,0.25);
+  }
+  .subtitle { color: var(--accent); letter-spacing: 3px; font-size: 13px; text-transform: uppercase; margin-bottom: 28px; }
+  .credit { color: var(--muted); font-size: 12px; font-style: italic; max-width: 420px; line-height: 1.6; margin-top: 10px;}
+
+  button.btn {
+    font-family: inherit;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--accent);
+    padding: 14px 30px;
+    font-size: 17px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    margin: 8px;
+    border-radius: 2px;
+    transition: background .2s, color .2s;
+    min-width: 160px;
+  }
+  button.btn:hover, button.btn:active { background: var(--accent); color: #14110a; }
+  button.btn.primary { background: var(--accent); color: #14110a; }
+  button.btn.primary:hover { background: #e0bb63; }
+
+  /* Intro slides */
+  .slide-text {
+    max-width: 620px;
+    font-size: clamp(18px, 3.4vw, 24px);
+    line-height: 1.7;
+    color: var(--ink);
+    opacity: 0;
+    transition: opacity 1s;
+  }
+  .slide-text.show { opacity: 1; }
+
+  /* Title cards */
+  #titlecard {
+    position: absolute; inset: 0;
+    background: #000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .8s;
+    text-align: center;
+    padding: 30px;
+  }
+  #titlecard.show { opacity: 1; }
+  #titlecard .tc-main { font-size: clamp(22px, 5vw, 34px); letter-spacing: 2px; color: var(--ink); }
+  #titlecard .tc-sub { font-size: 15px; color: var(--accent); letter-spacing: 3px; margin-top: 14px; text-transform: uppercase; }
+
+  /* HUD */
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 12px 14px;
+    z-index: 30;
+    pointer-events: none;
+    font-family: 'Courier New', monospace;
+  }
+  .hud-box {
+    background: rgba(8,10,14,0.72);
+    border: 1px solid rgba(201,162,75,0.3);
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--ink);
+    letter-spacing: 1px;
+    backdrop-filter: blur(2px);
+  }
+  .hud-box .lbl { color: var(--muted); font-size: 10px; text-transform: uppercase; display:block; }
+  .hud-box .val { font-size: 18px; }
+
+  #pauseBtn {
+    pointer-events: auto;
+    background: rgba(8,10,14,0.72);
+    border: 1px solid rgba(201,162,75,0.3);
+    color: var(--ink);
+    width: 40px; height: 40px;
+    border-radius: 3px; cursor: pointer; font-size: 16px;
+  }
+
+  /* Tutorial hint */
+  #hint {
+    position: absolute;
+    bottom: 18%; left: 50%; transform: translateX(-50%);
+    background: rgba(8,10,14,0.85);
+    border: 1px solid var(--accent);
+    color: var(--ink);
+    padding: 12px 20px;
+    border-radius: 4px;
+    font-size: 14px;
+    z-index: 35;
+    max-width: 80%;
+    text-align: center;
+    opacity: 0;
+    transition: opacity .5s;
+    pointer-events: none;
+  }
+  #hint.show { opacity: 1; }
+
+  /* Career card */
+  #careerCard .card {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 26px 30px;
+    max-width: 380px;
+    width: 90%;
+    text-align: left;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  #careerCard .pName { font-size: 26px; color: var(--accent); margin: 0 0 2px; }
+  #careerCard .pPos { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px; }
+  #careerCard .stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 15px; }
+  #careerCard .stat .k { color: var(--muted); }
+  #careerCard svg { display:block; margin: 0 auto 14px; }
+
+  /* Mobile touch controls */
+  #touchpad {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 38%;
+    display: none;
+    z-index: 25;
+    pointer-events: none;
+  }
+  .dpad {
+    position: absolute; bottom: 20px; left: 20px;
+    width: 150px; height: 150px;
+    pointer-events: auto;
+  }
+  .dbtn {
+    position: absolute;
+    background: rgba(201,162,75,0.18);
+    border: 1px solid rgba(201,162,75,0.4);
+    border-radius: 8px;
+    width: 48px; height: 48px;
+    display:flex; align-items:center; justify-content:center;
+    color: var(--ink); font-size: 20px;
+  }
+  .dbtn.up { top: 0; left: 51px; }
+  .dbtn.down { bottom: 0; left: 51px; }
+  .dbtn.left { top: 51px; left: 0; }
+  .dbtn.right { top: 51px; right: 0; }
+  .truckbtn {
+    position: absolute; bottom: 30px; right: 24px;
+    pointer-events: auto;
+    background: rgba(217,83,79,0.25);
+    border: 1px solid rgba(217,83,79,0.6);
+    color: var(--ink);
+    border-radius: 50%;
+    width: 96px; height: 96px;
+    font-size: 13px; letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  body.touch #touchpad.show { display: block; }
+
+  /* Lab tools */
+  #labtools {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; z-index: 30;
+  }
+  .tool {
+    background: rgba(8,10,14,0.8);
+    border: 1px solid rgba(201,162,75,0.4);
+    color: var(--ink);
+    padding: 10px 16px;
+    border-radius: 4px;
+    font-size: 13px; cursor: pointer;
+    letter-spacing: 1px;
+  }
+  .tool.on { background: var(--accent); color: #14110a; }
+
+  /* Case file sidebar */
+  #casefile {
+    position: absolute; top: 60px; right: 10px;
+    width: 168px;
+    background: rgba(8,10,14,0.82);
+    border: 1px solid rgba(201,162,75,0.28);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 28;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--ink);
+    max-height: 70%;
+    overflow: hidden;
+  }
+  #casefile h4 { margin: 0 0 8px; color: var(--accent); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  .cfrow { display:flex; gap:8px; align-items:center; margin-bottom: 8px; opacity: .35; transition: opacity .6s; }
+  .cfrow.found { opacity: 1; }
+  .cfrow .cftxt { line-height: 1.3; }
+  .cfrow .cftxt b { color: var(--accent); display:block; font-size: 11px; }
+  .cfrow .cftxt span { color: var(--muted); font-size: 10px; }
+
+  /* Lab progress */
+  #labprog {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    background: rgba(8,10,14,0.8);
+    border: 1px solid rgba(201,162,75,0.3);
+    padding: 8px 16px; border-radius: 4px;
+    z-index: 30; font-family:'Courier New',monospace; font-size: 13px;
+    text-align: center; min-width: 200px;
+  }
+  #labprog .bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  #labprog .bar i { display:block; height:100%; width:0%; background: var(--accent); transition: width .3s; }
+
+  /* Pushback / dialogue */
+  #pushback { background: #0d0f14; }
+  #dialogueWrap {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 16px;
+  }
+  #meters {
+    display: flex; gap: 10px; margin-bottom: 10px;
+  }
+  .meter { flex:1; background: var(--panel); border-radius: 4px; padding: 8px 10px; }
+  .meter .mlbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display:flex; justify-content:space-between; }
+  .meter .mbar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; margin-top: 5px; overflow:hidden; }
+  .meter .mbar i { display:block; height:100%; transition: width .7s cubic-bezier(.2,.8,.2,1); }
+  .meter.truth .mbar i { background: var(--truth); }
+  .meter.cred .mbar i { background: var(--cred); }
+  .meter.cost .mbar i { background: var(--cost); }
+
+  #scene {
+    flex: 1;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 22px;
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow-y: auto;
+  }
+  #speaker { color: var(--accent); font-size: 14px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+  #speakerRole { color: var(--muted); font-size: 12px; font-style: italic; margin-bottom: 16px; }
+  #dialogueText { font-size: clamp(17px, 3vw, 21px); line-height: 1.6; min-height: 60px; }
+  #choices { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .choice {
+    font-family: inherit;
+    text-align: left;
+    background: transparent;
+    border: 1px solid rgba(201,162,75,0.4);
+    color: var(--ink);
+    padding: 14px 16px;
+    border-radius: 5px;
+    font-size: 16px; line-height: 1.4;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .choice:hover, .choice:active { background: rgba(201,162,75,0.14); border-color: var(--accent); }
+  .choice .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display:block; margin-top: 6px; }
+
+  /* Prayer moment */
+  #prayer {
+    position: absolute; inset: 0;
+    background: #06070a;
+    display: none; flex-direction: column; align-items:center; justify-content:center;
+    z-index: 60; padding: 30px; text-align: center;
+  }
+  #prayer p { font-size: clamp(18px,3.2vw,23px); line-height: 1.7; max-width: 540px; color: var(--ink); font-style: italic; }
+
+  /* Pause menu */
+  #pauseMenu {
+    position: absolute; inset: 0;
+    background: rgba(4,5,8,0.92);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 90;
+  }
+  #pauseMenu.show { display: flex; }
+  #pauseMenu h2 { letter-spacing: 4px; color: var(--accent); }
+
+  /* Ending */
+  #ending {
+    overflow-y: auto;
+    padding: 30px 22px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #ending .eName { font-size: clamp(30px,7vw,52px); color: var(--accent); letter-spacing: 2px; margin: 8px 0 2px; text-align:center; }
+  #ending .eTag { color: var(--muted); font-style: italic; margin-bottom: 20px; }
+  #ending .epilogue { max-width: 600px; font-size: 17px; line-height: 1.7; text-align: center; margin-bottom: 24px; }
+  #ending .estats { display: flex; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; justify-content: center; }
+  #ending .estat { text-align: center; }
+  #ending .estat .n { font-size: 30px; color: var(--accent); }
+  #ending .estat .l { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  #ending .recap { max-width: 600px; width:100%; margin-bottom: 24px; }
+  #ending .recap h3 { color: var(--accent); letter-spacing: 2px; font-size: 15px; text-transform: uppercase; text-align:center; }
+  #ending .recapRow { display:flex; gap: 12px; align-items: center; background: var(--panel); border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+  #ending .recapRow .rt b { color: var(--ink); font-size: 15px; }
+  #ending .recapRow .rt span { color: var(--muted); font-size: 13px; line-height:1.4; display:block; margin-top:3px; }
+
+  .fade-black {
+    position:absolute; inset:0; background:#000; z-index:110;
+    opacity:0; pointer-events:none; transition: opacity .6s;
+  }
+  .fade-black.show { opacity:1; pointer-events:auto; }
+
+  .hidden { display:none !important; }
+
+  @media (max-width: 620px) {
+    #casefile { width: 130px; font-size: 10px; top: 56px; }
+    .credit { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="stage">
+    <!-- TITLE -->
+    <div id="title" class="layer active">
+      <canvas id="titleCanvas"></canvas>
+      <div class="overlay">
+        <h1 class="title">THE DISCOVERY</h1>
+        <div class="subtitle">A Forensic Investigation</div>
+        <div>
+          <button class="btn primary" id="startBtn">Start</button>
+          <button class="btn" id="aboutBtn">About</button>
+        </div>
+        <div class="credit">Inspired by <i>Concussion</i> by Jeanne Marie Laskas<br>and the work of Dr. Bennet Omalu.</div>
+      </div>
+    </div>
+
+    <!-- ABOUT -->
+    <div id="about" class="layer">
+      <div class="overlay">
+        <h2 style="color:var(--accent);letter-spacing:3px;">ABOUT</h2>
+        <div style="max-width:560px;line-height:1.7;font-size:16px;color:var(--ink);">
+          You are <b>Dr. Ben Okoye</b>, a forensic pathologist newly arrived in America.
+          Working in a county coroner's office, you uncover a pattern of brain damage in
+          retired professional football players — and face an institution unwilling to hear it.
+          <br><br>
+          <b>Phase 1 — The Field:</b> Arrow keys / WASD / touch to run. Take hits or truck through them.<br>
+          <b>Phase 2 — The Lab:</b> Drag to pan, click/tap to find evidence. Toggle the stain.<br>
+          <b>Phase 3 — The Pushback:</b> Choose your words. Every answer has a cost.
+          <br><br>
+          <span style="color:var(--muted);font-style:italic;font-size:14px;">
+          This is a work of fiction using invented names and a fictional league. It honors
+          real people who suffered from CTE.</span>
+        </div>
+        <button class="btn" id="aboutBack" style="margin-top:24px;">Back</button>
+      </div>
+    </div>
+
+    <!-- INTRO -->
+    <div id="intro" class="layer">
+      <div class="overlay">
+        <div class="slide-text" id="slideText"></div>
+        <button class="btn" id="introNext" style="margin-top:40px;">Continue</button>
+      </div>
+    </div>
+
+    <!-- FIELD -->
+    <div id="field" class="layer">
+      <canvas id="fieldCanvas"></canvas>
+    </div>
+
+    <!-- CAREER CARD -->
+    <div id="careerCard" class="layer">
+      <div class="overlay">
+        <div class="card" id="careerCardInner"></div>
+        <button class="btn primary" id="careerNext" style="margin-top:20px;">Continue</button>
+      </div>
+    </div>
+
+    <!-- LAB -->
+    <div id="lab" class="layer">
+      <canvas id="labCanvas"></canvas>
+      <div id="prayer"><p id="prayerText"></p></div>
+    </div>
+
+    <!-- PUSHBACK -->
+    <div id="pushback" class="layer">
+      <div id="dialogueWrap">
+        <div id="meters">
+          <div class="meter truth"><div class="mlbl"><span>Truth</span><span id="mvTruth">50</span></div><div class="mbar"><i id="mbTruth"></i></div></div>
+          <div class="meter cred"><div class="mlbl"><span>Credibility</span><span id="mvCred">50</span></div><div class="mbar"><i id="mbCred"></i></div></div>
+          <div class="meter cost"><div class="mlbl"><span>Personal Cost</span><span id="mvCost">10</span></div><div class="mbar"><i id="mbCost"></i></div></div>
+        </div>
+        <div id="scene">
+          <div id="speaker"></div>
+          <div id="speakerRole"></div>
+          <div id="dialogueText"></div>
+          <div id="choices"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ENDING -->
+    <div id="ending" class="layer"></div>
+
+    <!-- shared UI -->
+    <div id="hud" class="hidden">
+      <div class="hud-box" id="hudLeft"></div>
+      <div class="hud-box" id="hudMid"></div>
+      <button id="pauseBtn">II</button>
+    </div>
+
+    <div id="casefile" class="hidden">
+      <h4>Case File</h4>
+      <div id="cfList"></div>
+    </div>
+
+    <div id="labprog" class="hidden">
+      <div id="labprogText">Evidence: 0 / 0</div>
+      <div class="bar"><i id="labprogBar"></i></div>
+    </div>
+
+    <div id="labtools" class="hidden">
+      <div class="tool" id="toolMag">Magnifier: ON</div>
+      <div class="tool" id="toolStain">Stain: OFF</div>
+    </div>
+
+    <div id="touchpad">
+      <div class="dpad">
+        <div class="dbtn up" data-dir="up">▲</div>
+        <div class="dbtn down" data-dir="down">▼</div>
+        <div class="dbtn left" data-dir="left">◀</div>
+        <div class="dbtn right" data-dir="right">▶</div>
+      </div>
+      <button class="truckbtn" id="truckBtn">Truck</button>
+    </div>
+
+    <div id="hint"></div>
+    <div id="titlecard"><div class="tc-main" id="tcMain"></div><div class="tc-sub" id="tcSub"></div></div>
+    <div id="prayerLayer"></div>
+
+    <div id="pauseMenu">
+      <h2>PAUSED</h2>
+      <button class="btn" id="resumeBtn">Resume</button>
+      <button class="btn" id="soundBtn">Sound: ON</button>
+      <button class="btn" id="restartBtn">Restart</button>
+      <button class="btn" id="quitBtn">Quit to Menu</button>
+    </div>
+
+    <div id="fadeBlack" class="fade-black"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script>
+"use strict";
+(function(){
+
+// ---------------------------------------------------------------------------
+// Global state
+// ---------------------------------------------------------------------------
+const G = {
+  state: 'title',
+  soundOn: true,
+  paused: false,
+  pausable: false,         // whether pause is allowed in current phase
+  meters: { truth: 50, cred: 50, cost: 10 },
+  round: 0,                // field round index
+  labIndex: 0,             // lab investigation index
+  pushIndex: 0,            // dialogue encounter index
+  prayed: false,
+};
+
+// Fictional players spanning 1998-2008
+const PLAYERS = [
+  {
+    id: 0, name: "Marcus 'Maddog' Reyes", pos: "Linebacker", team: "Steel City Forge",
+    debut: 1998, color: "#9c4a3a",
+    bornDied: "1971 – 2009 (age 38)",
+    style: "hard", // tends to take/give big hits
+    fate: "Found dead in his truck. Family reported years of memory loss, rage, and depression. The first case that wouldn't leave you alone.",
+  },
+  {
+    id: 1, name: "Davon Pryce", pos: "Wide Receiver", team: "Bay Harbor Tides",
+    debut: 2001, color: "#3a6a9c",
+    bornDied: "1976 – 2011 (age 35)",
+    style: "fast",
+    fate: "A quick, brilliant route-runner. After retirement he could no longer remember the routes. He died alone, far from the cheering.",
+  },
+  {
+    id: 2, name: "Big Earl Tomlin", pos: "Running Back", team: "Riverside Ironworks",
+    debut: 2004, color: "#5a8c4a",
+    bornDied: "1979 – 2012 (age 33)",
+    style: "workhorse",
+    fate: "Carried the ball — and the team — for a decade. The carries carried a cost no scoreboard counted.",
+  },
+];
+
+// per-player accumulated impact and field results
+const careers = PLAYERS.map(p => ({ impact: 0, yards: 0, hits: 0 }));
+
+// ---------------------------------------------------------------------------
+// Audio (Tone.js, all optional / toggleable)
+// ---------------------------------------------------------------------------
+const Audio = {
+  ready: false,
+  started: false,
+  loops: {},
+  init(){
+    if (this.ready || typeof Tone === 'undefined') return;
+    try {
+      this.master = new Tone.Gain(0.0).toDestination();
+
+      // Phase 1: crowd roar (noise) + driving motif
+      this.crowd = new Tone.Noise("pink").connect(new Tone.Filter(800,"lowpass").connect(this.master));
+      this.crowd.volume.value = -22;
+      this.fieldSynth = new Tone.PolySynth(Tone.Synth).connect(this.master);
+      this.fieldSynth.volume.value = -16;
+
+      // Phase 2: sterile hum
+      this.hum = new Tone.Oscillator(110, "sine").connect(new Tone.Gain(0.04).connect(this.master));
+      this.hum2 = new Tone.Oscillator(58, "sine").connect(new Tone.Gain(0.05).connect(this.master));
+      this.labSynth = new Tone.FMSynth().connect(this.master);
+      this.labSynth.volume.value = -20;
+
+      // Phase 3: ambient room tone
+      this.room = new Tone.Noise("brown").connect(new Tone.Filter(300,"lowpass").connect(this.master));
+      this.room.volume.value = -30;
+      this.pushSynth = new Tone.Synth().connect(this.master);
+      this.pushSynth.volume.value = -18;
+
+      // SFX
+      this.hit = new Tone.MembraneSynth().connect(this.master);
+      this.hit.volume.value = -6;
+      this.ding = new Tone.Synth().connect(this.master);
+      this.ding.volume.value = -10;
+
+      this.ready = true;
+    } catch(e){ console.warn("audio init failed", e); }
+  },
+  async start(){
+    if (!this.ready) this.init();
+    if (!this.ready) return;
+    if (!this.started){
+      try { await Tone.start(); } catch(e){}
+      this.started = true;
+      Tone.Transport.start();
+    }
+    this.applyVolume();
+  },
+  applyVolume(){
+    if (!this.ready) return;
+    this.master.gain.rampTo(G.soundOn ? 1 : 0, 0.3);
+  },
+  _motif: null,
+  phase(name){
+    if (!this.ready) return;
+    // stop existing loops
+    if (this._motif){ this._motif.stop(); this._motif.dispose(); this._motif=null; }
+    this.crowd.stop(); this.hum.stop(); this.hum2.stop(); this.room.stop();
+    try {
+      if (name === 'field'){
+        this.crowd.start();
+        const notes = ["C2","G2","C3","E3"];
+        let i=0;
+        this._motif = new Tone.Loop(t=>{
+          this.fieldSynth.triggerAttackRelease(notes[i%notes.length], "8n", t);
+          i++;
+        }, "0:2").start(0);
+      } else if (name === 'lab'){
+        this.hum.start(); this.hum2.start();
+        const notes = ["A4","C5","E5","D5","G4"];
+        let i=0;
+        this._motif = new Tone.Loop(t=>{
+          this.labSynth.triggerAttackRelease(notes[i%notes.length], "2n", t);
+          i++;
+        }, "1:0").start(0);
+      } else if (name === 'push'){
+        this.room.start();
+        const notes = ["E3","G3","B3","A3"];
+        let i=0;
+        this._motif = new Tone.Loop(t=>{
+          this.pushSynth.triggerAttackRelease(notes[i%notes.length], "4n", t);
+          i++;
+        }, "1:2").start(0);
+      }
+    } catch(e){}
+  },
+  stopAll(){
+    if (!this.ready) return;
+    if (this._motif){ this._motif.stop(); this._motif.dispose(); this._motif=null; }
+    try { this.crowd.stop(); this.hum.stop(); this.hum2.stop(); this.room.stop(); } catch(e){}
+  },
+  sfxHit(power){
+    if (!this.ready || !G.soundOn) return;
+    try { this.hit.triggerAttackRelease(power>1?"C1":"E1", "8n"); } catch(e){}
+  },
+  sfxDing(){
+    if (!this.ready || !G.soundOn) return;
+    try { this.ding.triggerAttackRelease("C6", "16n"); } catch(e){}
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Layer / screen management
+// ---------------------------------------------------------------------------
+const layers = {};
+['title','about','intro','field','careerCard','lab','pushback','ending'].forEach(id=>{
+  layers[id] = document.getElementById(id);
+});
+function show(id){
+  Object.values(layers).forEach(l=>l.classList.remove('active'));
+  layers[id].classList.add('active');
+  G.state = id;
+}
+const $ = id => document.getElementById(id);
+
+const fade = $('fadeBlack');
+function fadeOut(cb){
+  fade.classList.add('show');
+  setTimeout(cb, 650);
+}
+function fadeIn(){
+  fade.classList.remove('show');
+}
+function titleCard(main, sub, dur, cb){
+  const tc = $('titlecard');
+  $('tcMain').textContent = main;
+  $('tcSub').textContent = sub || '';
+  tc.classList.add('show');
+  setTimeout(()=>{
+    tc.classList.remove('show');
+    setTimeout(cb, 800);
+  }, dur);
+}
+
+// ---------------------------------------------------------------------------
+// Title screen background animation
+// ---------------------------------------------------------------------------
+const titleCanvas = $('titleCanvas');
+const tctx = titleCanvas.getContext('2d');
+let titleAnim;
+function resizeCanvas(c){
+  const r = c.getBoundingClientRect();
+  c.width = r.width; c.height = r.height;
+}
+function drawTitle(){
+  const w = titleCanvas.width, h = titleCanvas.height;
+  if (!w) { resizeCanvas(titleCanvas); }
+  const t = Date.now()/1000;
+  const grad = tctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,"#0a0c10");
+  grad.addColorStop(1,"#161b24");
+  tctx.fillStyle = grad; tctx.fillRect(0,0,w,h);
+
+  const cx = w/2, cy = h*0.58;
+  // Left: player silhouette fading into right: brain scan
+  // brain scan rings
+  tctx.save();
+  tctx.translate(cx + w*0.18, cy);
+  for (let i=0;i<6;i++){
+    const r = 30 + i*22 + Math.sin(t + i)*4;
+    tctx.beginPath();
+    tctx.strokeStyle = `rgba(74,163,223,${0.22 - i*0.025})`;
+    tctx.lineWidth = 2;
+    tctx.arc(0,0,r,0,Math.PI*2);
+    tctx.stroke();
+  }
+  // neuron dots
+  tctx.fillStyle = "rgba(201,162,75,0.5)";
+  for (let i=0;i<14;i++){
+    const a = i*0.9 + t*0.2;
+    const rr = 20 + (i%5)*16;
+    tctx.beginPath();
+    tctx.arc(Math.cos(a)*rr, Math.sin(a)*rr*0.8, 2, 0, Math.PI*2);
+    tctx.fill();
+  }
+  tctx.restore();
+
+  // player silhouette
+  tctx.save();
+  tctx.translate(cx - w*0.18, cy);
+  tctx.fillStyle = "rgba(10,12,16,0.92)";
+  const grd2 = tctx.createLinearGradient(-40,0,60,0);
+  grd2.addColorStop(0,"rgba(20,24,32,1)");
+  grd2.addColorStop(1,"rgba(20,24,32,0)");
+  tctx.fillStyle = grd2;
+  // helmet + body silhouette (simple geometric)
+  tctx.beginPath();
+  tctx.arc(0,-70,26,0,Math.PI*2);          // helmet
+  tctx.rect(-26,-46,52,90);                  // torso
+  tctx.fill();
+  tctx.fillRect(-46,-40,20,60);              // arm
+  tctx.fillRect(26,-40,20,60);
+  tctx.fillRect(-22,40,16,55);               // legs
+  tctx.fillRect(8,40,16,55);
+  tctx.restore();
+
+  titleAnim = requestAnimationFrame(drawTitle);
+}
+
+// ---------------------------------------------------------------------------
+// Intro slides
+// ---------------------------------------------------------------------------
+const INTRO_SLIDES = [
+  "I came to America with a stack of degrees and a belief that the dead still speak — if you are willing to listen.",
+  "They gave me a desk at the county coroner's office in Pittsburgh. I did not understand football. To me it was only a game on a loud television.",
+  "Then a body came to my table. A man the whole city had cheered. And I began to listen.",
+];
+let introIdx = 0;
+function startIntro(){
+  show('intro');
+  introIdx = 0;
+  renderSlide();
+}
+function renderSlide(){
+  const el = $('slideText');
+  el.classList.remove('show');
+  setTimeout(()=>{
+    el.textContent = INTRO_SLIDES[introIdx];
+    el.classList.add('show');
+  }, 200);
+  $('introNext').textContent = (introIdx >= INTRO_SLIDES.length-1) ? "Begin" : "Continue";
+}
+$('introNext').onclick = ()=>{
+  introIdx++;
+  if (introIdx >= INTRO_SLIDES.length){
+    beginFieldPhase();
+  } else {
+    renderSlide();
+  }
+};
+
+// ---------------------------------------------------------------------------
+// PHASE 1 — THE FIELD
+// ---------------------------------------------------------------------------
+const fieldCanvas = $('fieldCanvas');
+const fctx = fieldCanvas.getContext('2d');
+const Field = {
+  active: false,
+  round: 0,
+  timeLeft: 30,
+  lastTs: 0,
+  shake: 0,
+  player: null,
+  defenders: [],
+  yards: 0,
+  hits: 0,
+  scrollY: 0,
+  spawnTimer: 0,
+  trucking: false,
+  invuln: 0,
+  flash: 0,
+  raf: null,
+};
+const keys = {};
+const touchDir = { up:false, down:false, left:false, right:false };
+
+function beginFieldPhase(){
+  G.round = 0;
+  fadeOut(()=>{
+    show('field');
+    fadeIn();
+    Audio.phase('field');
+    titleCard("Three Sundays. Three Men.", "The League · 1998 – 2008", 1800, ()=>{
+      startFieldRound(0);
+    });
+  });
+}
+
+function startFieldRound(idx){
+  resizeCanvas(fieldCanvas);
+  Field.round = idx;
+  Field.timeLeft = 30;
+  Field.yards = 0;
+  Field.hits = 0;
+  Field.scrollY = 0;
+  Field.shake = 0;
+  Field.spawnTimer = 0;
+  Field.invuln = 1.0;
+  Field.flash = 0;
+  Field.defenders = [];
+  Field.player = { x: fieldCanvas.width/2, y: fieldCanvas.height*0.72, r: 14, vx:0, vy:0, speed: 200 };
+  Field.active = true;
+  const p = PLAYERS[idx];
+  // speed/feel per style
+  if (p.style==='fast') Field.player.speed = 250;
+  if (p.style==='hard') Field.player.speed = 175;
+  if (p.style==='workhorse') Field.player.speed = 200;
+
+  $('hud').classList.remove('hidden');
+  G.pausable = true;
+  updateFieldHud();
+
+  if (isTouch()) $('touchpad').classList.add('show');
+
+  if (idx===0){
+    showHint("Arrow keys / WASD to run. Reach the end zone. Hold SHIFT (or TRUCK) to bulldoze defenders — more yards, more damage.");
+  }
+  Field.lastTs = performance.now();
+  cancelAnimationFrame(Field.raf);
+  loopField(Field.lastTs);
+}
+
+function updateFieldHud(){
+  const p = PLAYERS[Field.round];
+  $('hudLeft').innerHTML = `<span class="lbl">${p.name.split(' ').slice(-1)} · ${p.pos}</span><span class="val">${Math.floor(Field.yards)} yds</span>`;
+  $('hudMid').innerHTML = `<span class="lbl">Round ${Field.round+1}/3 · ${p.debut+Field.round}</span><span class="val">${Math.ceil(Field.timeLeft)}s</span>`;
+}
+
+function spawnDefender(){
+  const w = fieldCanvas.width;
+  const lane = Math.random()*w;
+  const speed = 60 + Math.random()*70 + Field.round*15;
+  Field.defenders.push({
+    x: lane,
+    y: -30 - Math.random()*80,
+    r: 13,
+    vx: (Math.random()-0.5)*40,
+    speed: speed,
+    hit: false,
+  });
+}
+
+function loopField(ts){
+  if (!Field.active) return;
+  const dt = Math.min(0.05, (ts - Field.lastTs)/1000);
+  Field.lastTs = ts;
+  if (!G.paused){
+    updateField(dt);
+  }
+  renderField();
+  Field.raf = requestAnimationFrame(loopField);
+}
+
+function updateField(dt){
+  Field.timeLeft -= dt;
+  Field.invuln = Math.max(0, Field.invuln - dt);
+  Field.flash = Math.max(0, Field.flash - dt*3);
+  Field.shake *= 0.86;
+
+  const p = Field.player;
+  // input
+  let ix=0, iy=0;
+  if (keys['ArrowUp']||keys['w']||touchDir.up) iy-=1;
+  if (keys['ArrowDown']||keys['s']||touchDir.down) iy+=1;
+  if (keys['ArrowLeft']||keys['a']||touchDir.left) ix-=1;
+  if (keys['ArrowRight']||keys['d']||touchDir.right) ix+=1;
+  const trucking = (keys['Shift']||Field.truckHeld);
+  Field.trucking = trucking;
+  const spd = p.speed * (trucking?0.78:1);
+  const len = Math.hypot(ix,iy)||1;
+  p.x += (ix/len)*spd*dt;
+  p.y += (iy/len)*spd*dt;
+  // auto forward progress (running upfield)
+  const forward = (60 + (trucking?20:0)) * dt; // base advance
+  Field.yards += forward * 0.5;
+  Field.scrollY += forward * 2.2;
+
+  p.x = Math.max(p.r, Math.min(fieldCanvas.width-p.r, p.x));
+  p.y = Math.max(fieldCanvas.height*0.25, Math.min(fieldCanvas.height-p.r, p.y));
+
+  // spawn
+  Field.spawnTimer -= dt;
+  const rate = 0.55 - Field.round*0.05;
+  if (Field.spawnTimer<=0){
+    spawnDefender();
+    Field.spawnTimer = rate + Math.random()*0.4;
+  }
+
+  // update defenders
+  for (const d of Field.defenders){
+    // move toward player a bit + downward scroll
+    const dx = p.x - d.x;
+    d.x += Math.sign(dx)*Math.min(Math.abs(dx), d.speed*0.4*dt) + d.vx*dt;
+    d.y += d.speed*dt + Field.scrollSpeed(dt);
+    // collision
+    if (!d.hit && Math.hypot(d.x-p.x, d.y-p.y) < d.r+p.r){
+      handleTackle(d);
+    }
+  }
+  Field.defenders = Field.defenders.filter(d=> d.y < fieldCanvas.height+40 && !d.gone);
+
+  updateFieldHud();
+
+  if (Field.timeLeft <= 0){
+    endFieldRound();
+  }
+}
+Field.scrollSpeed = (dt)=> 90*dt;
+
+function handleTackle(d){
+  const p = PLAYERS[Field.round];
+  if (Field.trucking){
+    // truck through: push past, gain yards, take MORE impact
+    d.gone = true;
+    d.hit = true;
+    Field.hits++;
+    careers[Field.round].impact += (p.style==='hard'?14:11);
+    Field.yards += 8;
+    Field.shake = 16;
+    Field.flash = 1;
+    Audio.sfxHit(2);
+  } else {
+    if (Field.invuln>0) return;
+    // tackled: get hit, lose a little, knockback
+    d.gone = true;
+    d.hit = true;
+    Field.hits++;
+    careers[Field.round].impact += (p.style==='hard'?9:7);
+    Field.invuln = 0.9;
+    Field.shake = 12;
+    Field.flash = 0.8;
+    // knock back
+    Field.player.y += 26;
+    Audio.sfxHit(1);
+  }
+}
+
+function renderField(){
+  const w = fieldCanvas.width, h = fieldCanvas.height;
+  fctx.save();
+  // screen shake
+  if (Field.shake>0.3){
+    fctx.translate((Math.random()-0.5)*Field.shake, (Math.random()-0.5)*Field.shake);
+  }
+  // field
+  fctx.fillStyle = "#1d3b22"; fctx.fillRect(-20,-20,w+40,h+40);
+  // yard lines scrolling
+  fctx.strokeStyle = "rgba(255,255,255,0.18)"; fctx.lineWidth=3;
+  const off = (Field.scrollY % 80);
+  for (let y=-80; y<h+80; y+=80){
+    const yy = y + off;
+    fctx.beginPath(); fctx.moveTo(0,yy); fctx.lineTo(w,yy); fctx.stroke();
+  }
+  // sideline shading
+  fctx.fillStyle="rgba(255,255,255,0.04)"; fctx.fillRect(0,0,18,h); fctx.fillRect(w-18,0,18,h);
+
+  // end zone hint near top
+  // defenders
+  for (const d of Field.defenders){
+    fctx.fillStyle = "#2b2f38";
+    fctx.beginPath(); fctx.arc(d.x,d.y,d.r,0,Math.PI*2); fctx.fill();
+    fctx.fillStyle = "#c0c4cc";
+    fctx.fillRect(d.x-5, d.y-3, 10, 6);
+  }
+  // player
+  const p = Field.player;
+  const col = PLAYERS[Field.round].color;
+  if (Field.invuln>0 && Math.floor(Field.invuln*12)%2===0){
+    fctx.globalAlpha = 0.5;
+  }
+  fctx.fillStyle = Field.trucking ? "#d9534f" : col;
+  fctx.beginPath(); fctx.arc(p.x,p.y,p.r,0,Math.PI*2); fctx.fill();
+  fctx.fillStyle="#fff"; fctx.fillRect(p.x-5,p.y-3,10,6);
+  fctx.globalAlpha=1;
+
+  fctx.restore();
+
+  // impact flash
+  if (Field.flash>0){
+    fctx.fillStyle = `rgba(255,255,255,${Field.flash*0.4})`;
+    fctx.fillRect(0,0,w,h);
+  }
+  // crowd vignette top
+  const vg = fctx.createLinearGradient(0,0,0,h*0.25);
+  vg.addColorStop(0,"rgba(0,0,0,0.45)"); vg.addColorStop(1,"rgba(0,0,0,0)");
+  fctx.fillStyle=vg; fctx.fillRect(0,0,w,h*0.25);
+}
+
+function endFieldRound(){
+  Field.active = false;
+  cancelAnimationFrame(Field.raf);
+  $('touchpad').classList.remove('show');
+  $('hud').classList.add('hidden');
+  hideHint();
+  careers[Field.round].yards = Math.floor(Field.yards);
+  careers[Field.round].hits = Field.hits;
+  showCareerCard(Field.round);
+}
+
+// ---------------------------------------------------------------------------
+// Career card (between rounds)
+// ---------------------------------------------------------------------------
+function geoPortrait(color, age){
+  // simple geometric portrait, age tints it grayer
+  const gray = Math.min(0.6, age*0.04);
+  return `<svg width="84" height="84" viewBox="0 0 84 84">
+    <rect width="84" height="84" rx="8" fill="#0d1016"/>
+    <circle cx="42" cy="34" r="20" fill="${color}" opacity="${1-gray}"/>
+    <rect x="22" y="52" width="40" height="28" rx="10" fill="${color}" opacity="${0.85-gray}"/>
+    <rect x="30" y="28" width="24" height="6" rx="3" fill="#0d1016"/>
+  </svg>`;
+}
+function showCareerCard(idx){
+  const p = PLAYERS[idx];
+  const c = careers[idx];
+  const age = (p.debut+idx) - p.debut + 27; // rough on-field age
+  const wear = c.impact > 80 ? "Heavy" : c.impact>45 ? "Notable" : "Light";
+  $('careerCardInner').innerHTML = `
+    ${geoPortrait(p.color, idx)}
+    <div class="pName">${p.name}</div>
+    <div class="pPos">${p.pos} · ${p.team}</div>
+    <div class="stat"><span class="k">Season</span><span>${p.debut+idx}</span></div>
+    <div class="stat"><span class="k">Yards this drive</span><span>${c.yards}</span></div>
+    <div class="stat"><span class="k">Tackles absorbed</span><span>${c.hits}</span></div>
+    <div class="stat"><span class="k">Cumulative impact</span><span>${wear}</span></div>
+  `;
+  show('careerCard');
+  $('careerNext').textContent = (idx>=2) ? "Years pass…" : "Next Sunday";
+}
+$('careerNext').onclick = ()=>{
+  if (Field.round >= 2){
+    beginLabPhase();
+  } else {
+    fadeOut(()=>{
+      show('field'); fadeIn();
+      startFieldRound(Field.round+1);
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// PHASE 2 — THE LAB
+// ---------------------------------------------------------------------------
+const labCanvas = $('labCanvas');
+const lctx = labCanvas.getContext('2d');
+const Lab = {
+  active:false,
+  index:0,
+  spots:[],          // {x,y,r,found}
+  needed:0,
+  found:0,
+  cam:{x:0,y:0,zoom:1},
+  drag:null,
+  stain:false,
+  mag:true,
+  cursor:{x:0,y:0,active:false},
+  tissueSeed:0,
+  raf:null,
+  startTime:0,
+};
+
+function beginLabPhase(){
+  fadeOut(()=>{
+    show('lab'); fadeIn();
+    Audio.phase('lab');
+    titleCard("Pittsburgh, 2009", "Allegheny County Coroner's Office", 2000, ()=>{
+      // one-time prayer moment
+      doPrayer(()=> startLabInvestigation(0));
+    });
+  });
+}
+
+function doPrayer(cb){
+  if (G.prayed){ cb(); return; }
+  G.prayed = true;
+  const pr = $('prayer');
+  $('prayerText').innerHTML = "Before the first cut, I bow my head.<br><br>\"Let me see what is there,\" I whisper, \"and let me have the courage to say it.\"";
+  pr.style.display='flex';
+  pr.style.opacity=0;
+  pr.style.transition='opacity 1.2s';
+  requestAnimationFrame(()=> pr.style.opacity=1);
+  setTimeout(()=>{
+    pr.style.opacity=0;
+    setTimeout(()=>{ pr.style.display='none'; cb(); }, 1200);
+  }, 4200);
+}
+
+const LAB_TITLES = ["Pittsburgh, 2009","Pittsburgh, 2011","Pittsburgh, 2012"];
+function startLabInvestigation(idx){
+  resizeCanvas(labCanvas);
+  Lab.index = idx;
+  Lab.active = true;
+  Lab.found = 0;
+  Lab.stain = false;
+  Lab.mag = true;
+  Lab.cam = {x:0,y:0,zoom:1};
+  Lab.tissueSeed = 1000 + idx*777;
+  // spots count scales with impact score from phase 1
+  const impact = careers[idx].impact;
+  const base = 4;
+  Lab.totalSpots = base + Math.round(impact/22); // more impact, more deposits
+  Lab.needed = Math.max(3, Math.round(Lab.totalSpots*0.6));
+  Lab.spots = [];
+  for (let i=0;i<Lab.totalSpots;i++){
+    Lab.spots.push({
+      x: 80 + Math.random()*(labCanvas.width-160),
+      y: 90 + Math.random()*(labCanvas.height-180),
+      r: 7 + Math.random()*6,
+      found:false,
+    });
+  }
+
+  $('labprog').classList.remove('hidden');
+  $('labtools').classList.remove('hidden');
+  $('casefile').classList.remove('hidden');
+  $('hud').classList.add('hidden');
+  G.pausable = true;
+  $('toolStain').textContent = "Stain: OFF";
+  $('toolStain').classList.remove('on');
+  $('toolMag').textContent = "Magnifier: ON";
+  $('toolMag').classList.add('on');
+
+  updateLabProg();
+  buildCaseFile();
+
+  if (idx===0){
+    showHint("Drag to pan the slide. Tap a dark tau deposit to log it. Toggle the STAIN to reveal faint ones. Find enough to confirm the case.");
+  }
+  Lab.startTime = performance.now();
+  cancelAnimationFrame(Lab.raf);
+  loopLab();
+}
+
+function updateLabProg(){
+  $('labprogText').textContent = `Tau deposits: ${Lab.found} / ${Lab.needed}`;
+  $('labprogBar').style.width = Math.min(100, (Lab.found/Lab.needed)*100)+"%";
+}
+
+function buildCaseFile(){
+  // case file shows the 3 players; current one being analyzed
+  let html = '';
+  PLAYERS.forEach((p,i)=>{
+    const done = i < Lab.index || (i===Lab.index);
+    const analyzed = i < Lab.index;
+    html += `<div class="cfrow ${done?'found':''}" id="cf${i}">
+      ${geoPortrait(p.color, 3)}
+      <div class="cftxt">
+        <b>${p.name.split("'").pop().trim().split(' ').slice(-1)[0]||p.name}</b>
+        <span>${p.pos}<br>${analyzed?'CTE confirmed':(i===Lab.index?'Examining…':'Pending')}</span>
+      </div>
+    </div>`;
+  });
+  $('cfList').innerHTML = html;
+}
+
+function loopLab(){
+  if (!Lab.active) return;
+  if (!G.paused) renderLab();
+  Lab.raf = requestAnimationFrame(loopLab);
+}
+
+function renderLab(){
+  const w = labCanvas.width, h = labCanvas.height;
+  lctx.fillStyle = "#0a0709"; lctx.fillRect(0,0,w,h);
+
+  lctx.save();
+  lctx.translate(Lab.cam.x, Lab.cam.y);
+  lctx.scale(Lab.cam.zoom, Lab.cam.zoom);
+
+  // tissue background — pinkish stained brain tissue, procedural
+  lctx.fillStyle = Lab.stain ? "#3a2230" : "#2a1c24";
+  lctx.fillRect(-50,-50,w+100,h+100);
+  // fibrous texture
+  let s = Lab.tissueSeed;
+  const rnd = ()=>{ s=(s*9301+49297)%233280; return s/233280; };
+  lctx.globalAlpha = 0.5;
+  for (let i=0;i<160;i++){
+    const x=rnd()*w, y=rnd()*h, r=4+rnd()*18;
+    lctx.fillStyle = Lab.stain
+      ? `rgba(${150+rnd()*60},${90+rnd()*40},${120+rnd()*40},0.25)`
+      : `rgba(${120+rnd()*50},${80+rnd()*30},${95+rnd()*30},0.25)`;
+    lctx.beginPath(); lctx.arc(x,y,r,0,Math.PI*2); lctx.fill();
+  }
+  lctx.globalAlpha = 1;
+
+  // tau spots
+  for (const sp of Lab.spots){
+    if (sp.found){
+      lctx.strokeStyle = "#4aa3df"; lctx.lineWidth = 3/Lab.cam.zoom;
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r+6,0,Math.PI*2); lctx.stroke();
+      lctx.fillStyle = "rgba(74,163,223,0.25)";
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r,0,Math.PI*2); lctx.fill();
+    } else {
+      // visibility depends on stain
+      const vis = Lab.stain ? 0.85 : 0.32;
+      lctx.fillStyle = `rgba(40,18,30,${vis})`;
+      lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r,0,Math.PI*2); lctx.fill();
+      if (Lab.stain){
+        lctx.fillStyle = "rgba(90,30,60,0.7)";
+        lctx.beginPath(); lctx.arc(sp.x,sp.y,sp.r*0.55,0,Math.PI*2); lctx.fill();
+      }
+    }
+  }
+  lctx.restore();
+
+  // microscope vignette
+  const grd = lctx.createRadialGradient(w/2,h/2,h*0.2,w/2,h/2,h*0.7);
+  grd.addColorStop(0,"rgba(0,0,0,0)");
+  grd.addColorStop(1,"rgba(0,0,0,0.85)");
+  lctx.fillStyle=grd; lctx.fillRect(0,0,w,h);
+
+  // magnifier lens at cursor
+  if (Lab.mag && Lab.cursor.active){
+    lctx.save();
+    lctx.beginPath();
+    lctx.arc(Lab.cursor.x, Lab.cursor.y, 56, 0, Math.PI*2);
+    lctx.strokeStyle="rgba(201,162,75,0.7)"; lctx.lineWidth=2; lctx.stroke();
+    lctx.clip();
+    lctx.fillStyle="rgba(255,255,255,0.05)";
+    lctx.fillRect(Lab.cursor.x-56,Lab.cursor.y-56,112,112);
+    lctx.restore();
+  }
+}
+
+// lab interaction: screen->world
+function labWorld(px,py){
+  return { x:(px-Lab.cam.x)/Lab.cam.zoom, y:(py-Lab.cam.y)/Lab.cam.zoom };
+}
+function labTap(px,py){
+  const wpt = labWorld(px,py);
+  for (const sp of Lab.spots){
+    if (sp.found) continue;
+    if (Math.hypot(sp.x-wpt.x, sp.y-wpt.y) < sp.r+14/Lab.cam.zoom){
+      // only findable if stain on OR it's a "visible" one
+      sp.found = true;
+      Lab.found++;
+      Audio.sfxDing();
+      updateLabProg();
+      if (Lab.found >= Lab.needed){
+        setTimeout(finishLabInvestigation, 500);
+      }
+      return;
+    }
+  }
+}
+
+function finishLabInvestigation(){
+  if (!Lab.active) return;
+  Lab.active = false;
+  cancelAnimationFrame(Lab.raf);
+  // mark found
+  const cf = $('cf'+Lab.index);
+  if (cf) cf.classList.add('found');
+
+  if (Lab.index >= 2){
+    $('labprog').classList.add('hidden');
+    $('labtools').classList.add('hidden');
+    hideHint();
+    fadeOut(()=>{
+      $('casefile').classList.add('hidden');
+      beginPushbackPhase();
+    });
+  } else {
+    fadeOut(()=>{
+      titleCardImmediate();
+      startLabInvestigation(Lab.index+1);
+      fadeIn();
+    });
+  }
+}
+function titleCardImmediate(){
+  const tc = $('titlecard');
+  $('tcMain').textContent = LAB_TITLES[Lab.index] || "Pittsburgh";
+  $('tcSub').textContent = "A new file opens";
+  tc.classList.add('show');
+  setTimeout(()=> tc.classList.remove('show'), 1400);
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 3 — THE PUSHBACK
+// ---------------------------------------------------------------------------
+const ENCOUNTERS = [
+  {
+    speaker: "League Representative",
+    role: "Senior counsel for The League",
+    lines: [
+      "Doctor… Okoye, is it? We've read your paper. It's provocative. But our own physicians find no link between the game and what you call this 'encephalopathy.' We've funded three studies that say so.",
+    ],
+    choices: [
+      { text: "The tissue is the tissue. I'll publish what I found, on the record.",
+        eff: { truth:+12, cred:-6, cost:+10 }, reply: "Then you'll publish alone." },
+      { text: "I'm open to your data. Show me the studies and I'll weigh them honestly.",
+        eff: { truth:-4, cred:+8, cost:-2 }, reply: "We'll be in touch. Be reasonable, Doctor." },
+      { text: "I'm not attacking the game. I'm describing a disease. Those are different things.",
+        eff: { truth:+5, cred:+4, cost:+3 }, reply: "Describe it quietly, then." },
+    ],
+  },
+  {
+    speaker: "The Journalist",
+    role: "Investigative reporter",
+    lines: [
+      "Off the record — they're going to come after your credentials, not your science. An immigrant doctor in a county morgue versus a billion-dollar league. How much of this do you want me to print?",
+    ],
+    choices: [
+      { text: "Print all of it. The names, the slides, the disease. People deserve to know.",
+        eff: { truth:+12, cred:-3, cost:+8 }, reply: "Brave. I hope you're ready for what comes." },
+      { text: "Print the science, leave my name small. Let the findings carry it.",
+        eff: { truth:+4, cred:+6, cost:+1 }, reply: "Smart. Let the work speak." },
+      { text: "Hold it. I need more cases before I stake everything on three.",
+        eff: { truth:-8, cred:+5, cost:-4 }, reply: "Don't wait so long the story dies with you." },
+    ],
+  },
+  {
+    speaker: "Amara",
+    role: "Your wife",
+    lines: [
+      "Ben. You haven't slept. They called the house again. Whatever this is, it's bigger than us now. I just need to know — are you doing this because it's right, or because you can't let go?",
+    ],
+    choices: [
+      { text: "Both. If I bury it, those men died for nothing. I can't carry that.",
+        eff: { truth:+8, cred:0, cost:+12 }, reply: "Then we carry it together. But it will cost us." },
+      { text: "You're right. I'll set limits. Our family comes before the fight.",
+        eff: { truth:-6, cred:+2, cost:-10 }, reply: "Thank you. I needed to hear that." },
+      { text: "I came to this country to tell the truth about the dead. This is that.",
+        eff: { truth:+10, cred:+2, cost:+6 }, reply: "I married a stubborn man. Just come home tonight." },
+    ],
+  },
+  {
+    speaker: "Dr. Halloran",
+    role: "Fellow scientist",
+    lines: [
+      "They're demanding you prove causation in living players — an impossible standard, and they know it. Stand with me at the conference and we present together, or soften it and keep your post. Your call, Ben.",
+    ],
+    choices: [
+      { text: "We stand together. Full findings, impossible standard be damned.",
+        eff: { truth:+12, cred:-4, cost:+8 }, reply: "Then let's give them something they can't unsee." },
+      { text: "Present it as a hypothesis needing more study. Keep the door open.",
+        eff: { truth:-5, cred:+10, cost:-3 }, reply: "Cautious. It may be the wiser road." },
+      { text: "I'll publish; you keep your distance. No reason we both burn.",
+        eff: { truth:+6, cred:-2, cost:+10 }, reply: "Noble and foolish. That's you, Ben." },
+    ],
+  },
+];
+
+let pushStep = 0;        // 0 = show line, 1 = show reply
+let currentReply = "";
+
+function beginPushbackPhase(){
+  G.pushIndex = 0;
+  show('pushback');
+  fadeIn();
+  Audio.phase('push');
+  $('hud').classList.add('hidden');
+  G.pausable = true;
+  titleCard("The Pushback", "What the science costs you", 1800, ()=>{
+    renderMeters(true);
+    showEncounter(0);
+    if (G.pushIndex===0) showHint("Each answer moves three meters: Truth, Credibility, Personal Cost. There are no right answers.");
+  });
+}
+
+function renderMeters(instant){
+  const m = G.meters;
+  $('mvTruth').textContent = Math.round(m.truth);
+  $('mvCred').textContent = Math.round(m.cred);
+  $('mvCost').textContent = Math.round(m.cost);
+  $('mbTruth').style.width = clamp(m.truth)+"%";
+  $('mbCred').style.width = clamp(m.cred)+"%";
+  $('mbCost').style.width = clamp(m.cost)+"%";
+}
+function clamp(v){ return Math.max(0,Math.min(100,v)); }
+
+function showEncounter(idx){
+  G.pushIndex = idx;
+  pushStep = 0;
+  const e = ENCOUNTERS[idx];
+  $('speaker').textContent = e.speaker;
+  $('speakerRole').textContent = e.role;
+  $('dialogueText').textContent = e.lines[0];
+  const cont = $('choices');
+  cont.innerHTML = '';
+  e.choices.forEach((c,i)=>{
+    const b = document.createElement('button');
+    b.className='choice';
+    const tags = [];
+    if (c.eff.truth) tags.push(`Truth ${c.eff.truth>0?'+':''}${c.eff.truth}`);
+    if (c.eff.cred) tags.push(`Credibility ${c.eff.cred>0?'+':''}${c.eff.cred}`);
+    if (c.eff.cost) tags.push(`Cost ${c.eff.cost>0?'+':''}${c.eff.cost}`);
+    b.innerHTML = `${c.text}<span class="tag">${tags.join(' · ')}</span>`;
+    b.onclick = ()=> choosePush(idx,i);
+    cont.appendChild(b);
+  });
+}
+
+function choosePush(idx,ci){
+  const e = ENCOUNTERS[idx];
+  const c = e.choices[ci];
+  G.meters.truth = clamp(G.meters.truth + (c.eff.truth||0));
+  G.meters.cred  = clamp(G.meters.cred  + (c.eff.cred||0));
+  G.meters.cost  = clamp(G.meters.cost  + (c.eff.cost||0));
+  renderMeters();
+  hideHint();
+  // show reply, then next
+  $('dialogueText').textContent = c.reply;
+  $('choices').innerHTML = '';
+  const next = document.createElement('button');
+  next.className='btn primary';
+  next.style.alignSelf='center';
+  next.textContent = (idx>=ENCOUNTERS.length-1) ? "See the outcome" : "Continue";
+  next.onclick = ()=>{
+    if (idx >= ENCOUNTERS.length-1){
+      fadeOut(()=> showEnding());
+    } else {
+      showEncounter(idx+1);
+    }
+  };
+  $('choices').appendChild(next);
+}
+
+// ---------------------------------------------------------------------------
+// ENDING
+// ---------------------------------------------------------------------------
+function determineEnding(){
+  const {truth, cred, cost} = G.meters;
+  // The Martyr — max truth, destroyed cred, max cost
+  if (truth >= 70 && cred <= 35 && cost >= 60) return 'martyr';
+  // The Vindicated — high truth, decent cred, heavy cost
+  if (truth >= 65 && cred >= 45 && cost >= 50) return 'vindicated';
+  // The Silenced — low truth, high cred
+  if (truth <= 45 && cred >= 60) return 'silenced';
+  // The Compromised — medium truth, high cred, low cost
+  if (truth >= 45 && truth < 65 && cred >= 55 && cost <= 40) return 'compromised';
+  // The Catalyst — balanced
+  return 'catalyst';
+}
+
+const ENDINGS = {
+  vindicated: {
+    name: "The Vindicated",
+    tag: "You held the line, and the world caught up.",
+    epi: "Years passed. The studies you were told to trust quietly collapsed. The disease you named entered textbooks, courtrooms, and the conscience of a sport. It cost you your peace and nearly your career — but a generation of players now know the risk they carry. You were right, and being right was the heaviest thing you ever held.",
+  },
+  compromised: {
+    name: "The Compromised",
+    tag: "You kept your seat at the table.",
+    epi: "You softened the language, hedged the conclusions, and the establishment let you stay. Your name is on respectable papers; your home is calm. But on the quietest nights you remember the slides you didn't fight for, and the men whose stories you rounded down to keep the peace.",
+  },
+  silenced: {
+    name: "The Silenced",
+    tag: "The findings went into a drawer.",
+    epi: "It was easier to let it go. The League thanked you, your credentials stayed intact, and life moved on. Somewhere a file sits unopened, and other doctors, years later, will discover what you already knew — without ever learning your name.",
+  },
+  martyr: {
+    name: "The Martyr",
+    tag: "You gave everything and were called a fraud.",
+    epi: "You refused every compromise. They attacked your credentials, your accent, your right to be in the room — and for a long time it worked. You lost your standing and very nearly yourself. But truth has a long memory, and the record you left behind would not stay buried, whatever it cost the man who wrote it.",
+  },
+  catalyst: {
+    name: "The Catalyst",
+    tag: "You moved the science forward — and stepped aside.",
+    epi: "You weren't the loudest voice or the most decorated. But you put the first real evidence on the table and made it impossible to ignore. Others built on it, argued it, won where you could not. The discovery outgrew you, which is exactly what a discovery is supposed to do.",
+  },
+};
+
+function showEnding(){
+  Audio.stopAll();
+  const key = determineEnding();
+  const e = ENDINGS[key];
+  const m = G.meters;
+  show('ending');
+  fadeIn();
+  let recap = '';
+  PLAYERS.forEach((p,i)=>{
+    recap += `<div class="recapRow">${geoPortrait(p.color,3)}
+      <div class="rt"><b>${p.name}</b> — ${p.pos}, ${p.team}<br>
+      <span>${p.bornDied}. ${p.fate}</span></div></div>`;
+  });
+  $('ending').innerHTML = `
+    <div class="eName">${e.name}</div>
+    <div class="eTag">${e.tag}</div>
+    <div class="estats">
+      <div class="estat"><div class="n">${Math.round(m.truth)}</div><div class="l">Truth</div></div>
+      <div class="estat"><div class="n">${Math.round(m.cred)}</div><div class="l">Credibility</div></div>
+      <div class="estat"><div class="n">${Math.round(m.cost)}</div><div class="l">Personal Cost</div></div>
+    </div>
+    <div class="epilogue">${e.epi}</div>
+    <div class="recap">
+      <h3>What Became of Them</h3>
+      ${recap}
+    </div>
+    <div class="credit" style="margin-bottom:20px;">Inspired by <i>Concussion</i> by Jeanne Marie Laskas and the work of Dr. Bennet Omalu.</div>
+    <button class="btn primary" id="replayBtn">Play Again</button>
+  `;
+  $('replayBtn').onclick = resetAndTitle;
+}
+
+// ---------------------------------------------------------------------------
+// Pause menu
+// ---------------------------------------------------------------------------
+$('pauseBtn').onclick = togglePause;
+function togglePause(){
+  if (!G.pausable) return;
+  G.paused = !G.paused;
+  $('pauseMenu').classList.toggle('show', G.paused);
+}
+$('resumeBtn').onclick = ()=>{ G.paused=false; $('pauseMenu').classList.remove('show'); if(G.state==='field') Field.lastTs=performance.now(); };
+$('soundBtn').onclick = ()=>{
+  G.soundOn = !G.soundOn;
+  $('soundBtn').textContent = "Sound: " + (G.soundOn?"ON":"OFF");
+  Audio.applyVolume();
+};
+$('restartBtn').onclick = ()=>{ G.paused=false; $('pauseMenu').classList.remove('show'); resetAndTitle(); };
+$('quitBtn').onclick = ()=>{ G.paused=false; $('pauseMenu').classList.remove('show'); resetAndTitle(); };
+
+function resetAndTitle(){
+  // full reset
+  Audio.stopAll();
+  Field.active=false; Lab.active=false;
+  cancelAnimationFrame(Field.raf); cancelAnimationFrame(Lab.raf);
+  G.meters = { truth:50, cred:50, cost:10 };
+  G.round=0; G.labIndex=0; G.pushIndex=0; G.prayed=false; G.pausable=false;
+  careers.forEach(c=>{ c.impact=0; c.yards=0; c.hits=0; });
+  $('hud').classList.add('hidden');
+  $('casefile').classList.add('hidden');
+  $('labprog').classList.add('hidden');
+  $('labtools').classList.add('hidden');
+  $('touchpad').classList.remove('show');
+  show('title');
+  fadeIn();
+}
+
+// ---------------------------------------------------------------------------
+// Hints
+// ---------------------------------------------------------------------------
+let hintTimer;
+function showHint(txt){
+  const h = $('hint');
+  h.textContent = txt;
+  h.classList.add('show');
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(()=> h.classList.remove('show'), 6500);
+}
+function hideHint(){ $('hint').classList.remove('show'); }
+
+// ---------------------------------------------------------------------------
+// Input handling
+// ---------------------------------------------------------------------------
+window.addEventListener('keydown', e=>{
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+  if (e.key==='Shift') Field.truckHeld = true;
+  if (e.key==='Escape') togglePause();
+  if (e.key==='p'||e.key==='P') togglePause();
+});
+window.addEventListener('keyup', e=>{
+  keys[e.key] = false;
+  if (e.key==='Shift') Field.truckHeld = false;
+});
+
+// touch dpad
+document.querySelectorAll('.dbtn').forEach(b=>{
+  const dir = b.dataset.dir;
+  const on = e=>{ e.preventDefault(); touchDir[dir]=true; };
+  const off = e=>{ e.preventDefault(); touchDir[dir]=false; };
+  b.addEventListener('touchstart', on, {passive:false});
+  b.addEventListener('touchend', off, {passive:false});
+  b.addEventListener('touchcancel', off, {passive:false});
+  b.addEventListener('mousedown', on);
+  b.addEventListener('mouseup', off);
+  b.addEventListener('mouseleave', off);
+});
+const truckB = $('truckBtn');
+const truckOn = e=>{ e.preventDefault(); Field.truckHeld=true; };
+const truckOff = e=>{ e.preventDefault(); Field.truckHeld=false; };
+truckB.addEventListener('touchstart', truckOn, {passive:false});
+truckB.addEventListener('touchend', truckOff, {passive:false});
+truckB.addEventListener('mousedown', truckOn);
+truckB.addEventListener('mouseup', truckOff);
+
+// lab pointer
+function labPointerDown(px,py){
+  Lab.drag = { x:px, y:py, camx:Lab.cam.x, camy:Lab.cam.y, moved:false, t:Date.now() };
+  Lab.cursor.x=px; Lab.cursor.y=py; Lab.cursor.active=true;
+}
+function labPointerMove(px,py){
+  Lab.cursor.x=px; Lab.cursor.y=py;
+  if (Lab.drag){
+    const dx=px-Lab.drag.x, dy=py-Lab.drag.y;
+    if (Math.hypot(dx,dy)>6) Lab.drag.moved=true;
+    Lab.cam.x = Lab.drag.camx + dx;
+    Lab.cam.y = Lab.drag.camy + dy;
+  }
+}
+function labPointerUp(px,py){
+  if (Lab.drag && !Lab.drag.moved && Date.now()-Lab.drag.t < 400){
+    labTap(px,py);
+  }
+  Lab.drag = null;
+}
+function getPos(e, canvas){
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
+  return { x:(t.clientX-r.left), y:(t.clientY-r.top) };
+}
+labCanvas.addEventListener('mousedown', e=>{ const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); });
+labCanvas.addEventListener('mousemove', e=>{ const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); });
+window.addEventListener('mouseup', e=>{ if(G.state==='lab'){ const p=getPos(e,labCanvas); labPointerUp(p.x,p.y);} });
+labCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); }, {passive:false});
+labCanvas.addEventListener('touchmove', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); }, {passive:false});
+labCanvas.addEventListener('touchend', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerUp(p.x,p.y); }, {passive:false});
+// wheel zoom
+labCanvas.addEventListener('wheel', e=>{
+  if (G.state!=='lab') return;
+  e.preventDefault();
+  const factor = e.deltaY<0 ? 1.12 : 0.89;
+  const p = getPos(e,labCanvas);
+  const before = labWorld(p.x,p.y);
+  Lab.cam.zoom = Math.max(0.6, Math.min(3, Lab.cam.zoom*factor));
+  const after = labWorld(p.x,p.y);
+  Lab.cam.x += (after.x-before.x)*Lab.cam.zoom;
+  Lab.cam.y += (after.y-before.y)*Lab.cam.zoom;
+}, {passive:false});
+
+$('toolStain').onclick = ()=>{
+  Lab.stain = !Lab.stain;
+  $('toolStain').textContent = "Stain: " + (Lab.stain?"ON":"OFF");
+  $('toolStain').classList.toggle('on', Lab.stain);
+};
+$('toolMag').onclick = ()=>{
+  Lab.mag = !Lab.mag;
+  $('toolMag').textContent = "Magnifier: " + (Lab.mag?"ON":"OFF");
+  $('toolMag').classList.toggle('on', Lab.mag);
+};
+
+// ---------------------------------------------------------------------------
+// Title buttons
+// ---------------------------------------------------------------------------
+$('startBtn').onclick = async ()=>{
+  await Audio.start();
+  startIntro();
+};
+$('aboutBtn').onclick = ()=> show('about');
+$('aboutBack').onclick = ()=> show('title');
+
+// ---------------------------------------------------------------------------
+// Touch detection + resize
+// ---------------------------------------------------------------------------
+function isTouch(){ return ('ontouchstart' in window) || navigator.maxTouchPoints>0; }
+if (isTouch()) document.body.classList.add('touch');
+
+function resizeAll(){
+  [titleCanvas, fieldCanvas, labCanvas].forEach(resizeCanvas);
+}
+window.addEventListener('resize', resizeAll);
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+resizeAll();
+drawTitle();
+
+})();
+</script>
+</body>
+</html>
