@@ -539,7 +539,6 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script>
 "use strict";
@@ -823,15 +822,14 @@ $('introNext').onclick = ()=>{
 // ---------------------------------------------------------------------------
 // PHASE 1 — THE FIELD
 // ---------------------------------------------------------------------------
-// Brawl-Stars-style angled 3D field via Three.js, with a 2D canvas fallback.
+// Self-contained software 3D engine (no external libraries). Perspective-
+// projects boxy humanoid figures and a scrolling field onto the 2D canvas,
+// with flat-shaded faces sorted back-to-front (painter's algorithm).
 const fieldCanvas = $('fieldCanvas');
-const HAS_3D = (typeof THREE !== 'undefined');
-// A canvas can hold only one context type. Only grab 2D when we won't use WebGL.
-const fctx = HAS_3D ? null : fieldCanvas.getContext('2d');
+const fctx = fieldCanvas.getContext('2d');
 
-// Movement model is shared by both renderers:
-//   player.x  = lateral position  (-LANE .. +LANE)
-//   player.z  = forward position  (decreases as you run upfield)
+// Movement model:
+//   player.x = lateral (-LANE..+LANE), player.z = forward (decreases upfield)
 //   defenders move toward the player in +z and steer toward player.x
 const LANE = 9;
 const Field = {
@@ -839,137 +837,98 @@ const Field = {
   shake:0, flash:0, invuln:0, trucking:false, truckHeld:false,
   yards:0, hits:0, spawnTimer:0, raf:null,
   player:null, defenders:[],
-  speed:14,            // forward units/sec
-  lateral:11,          // lateral units/sec
-  bob:0,
-  three:null,          // three.js scene container
+  speed:14, lateral:11, bob:0,
+  crowd:[],
 };
 const keys = {};
 const touchDir = { up:false, down:false, left:false, right:false };
 
-// ---- Three.js scene -------------------------------------------------------
-function makeFigure(color, isDefender){
-  const g = new THREE.Group();
-  const cloth = new THREE.MeshStandardMaterial({ color, roughness:0.7, metalness:0.05 });
-  const skin = new THREE.MeshStandardMaterial({ color:0x6b4a32, roughness:0.9 });
-  const helmetMat = new THREE.MeshStandardMaterial({ color, roughness:0.35, metalness:0.4 });
-  // torso (shoulder pads look — wider top)
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.5,1.5,12), cloth);
-  torso.position.y = 1.5; torso.castShadow = true; g.add(torso);
-  const pads = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.5,0.9), cloth);
-  pads.position.y = 2.15; pads.castShadow = true; g.add(pads);
-  // head + helmet
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.36,16,16), skin);
-  head.position.y = 2.55; g.add(head);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.42,16,16,0,Math.PI*2,0,Math.PI*0.62), helmetMat);
-  helmet.position.y = 2.62; helmet.castShadow = true; g.add(helmet);
-  // arms
-  const armGeo = new THREE.CylinderGeometry(0.16,0.16,1.1,8);
-  const armL = new THREE.Mesh(armGeo, cloth); armL.position.set(-0.78,1.6,0); g.add(armL);
-  const armR = new THREE.Mesh(armGeo, cloth); armR.position.set(0.78,1.6,0); g.add(armR);
-  // legs (animated)
-  const legGeo = new THREE.CylinderGeometry(0.22,0.18,1.2,8);
-  const legL = new THREE.Mesh(legGeo, cloth); legL.position.set(-0.28,0.6,0); legL.castShadow=true; g.add(legL);
-  const legR = new THREE.Mesh(legGeo, cloth); legR.position.set(0.28,0.6,0); legR.castShadow=true; g.add(legR);
-  g.userData = { legL, legR, armL, armR, torso, baseColor:color };
-  return g;
+// ---- 3D math --------------------------------------------------------------
+const LIGHT = (()=>{ const v=[-0.4,1.0,0.25]; const l=Math.hypot(...v); return [v[0]/l,v[1]/l,v[2]/l]; })();
+function vsub(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
+function vdot(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function vcross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function vnorm(a){ const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l]; }
+function rotX(p, ang, piv){
+  if (!ang) return p;
+  const s=Math.sin(ang), c=Math.cos(ang);
+  const y=p[1]-piv[1], z=p[2]-piv[2];
+  return [p[0], piv[1]+y*c-z*s, piv[2]+y*s+z*c];
 }
 
-function initThree(){
-  if (!HAS_3D || Field.three) return;
-  const renderer = new THREE.WebGLRenderer({ canvas: fieldCanvas, antialias:true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0c10);
-  scene.fog = new THREE.Fog(0x0a0c10, 38, 78);
-
-  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
-
-  scene.add(new THREE.AmbientLight(0xb9c6d6, 0.7));
-  const sun = new THREE.DirectionalLight(0xfff2dd, 1.15);
-  sun.position.set(-12, 26, 10);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024,1024);
-  sun.shadow.camera.near = 1; sun.shadow.camera.far = 80;
-  sun.shadow.camera.left = -20; sun.shadow.camera.right = 20;
-  sun.shadow.camera.top = 20; sun.shadow.camera.bottom = -40;
-  scene.add(sun);
-
-  // turf
-  const turf = new THREE.Mesh(
-    new THREE.PlaneGeometry(26, 600),
-    new THREE.MeshStandardMaterial({ color:0x1f6a32, roughness:1 })
-  );
-  turf.rotation.x = -Math.PI/2; turf.position.z = -260; turf.receiveShadow = true;
-  scene.add(turf);
-  // mowed stripes
-  for (let i=0;i<60;i++){
-    const stripe = new THREE.Mesh(
-      new THREE.PlaneGeometry(26, 5),
-      new THREE.MeshStandardMaterial({ color: i%2? 0x238038 : 0x1c602e, roughness:1 })
-    );
-    stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.01, -i*10); stripe.receiveShadow = true;
-    scene.add(stripe);
-  }
-  // yard lines (recycled)
-  const yardLines = [];
-  const lineMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.55 });
-  for (let i=0;i<60;i++){
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(24, 0.3), lineMat);
-    line.rotation.x = -Math.PI/2; line.position.set(0,0.02,-i*10);
-    scene.add(line); yardLines.push(line);
-  }
-  // sidelines
-  [-12.6,12.6].forEach(x=>{
-    const sl = new THREE.Mesh(new THREE.PlaneGeometry(0.5,600), lineMat);
-    sl.rotation.x = -Math.PI/2; sl.position.set(x,0.02,-260); scene.add(sl);
-  });
-  // stadium stands (simple tiered boxes) + crowd speckle
-  function stand(x){
-    const grp = new THREE.Group();
-    for (let t=0;t<3;t++){
-      const tier = new THREE.Mesh(
-        new THREE.BoxGeometry(6, 2+t*1.4, 560),
-        new THREE.MeshStandardMaterial({ color:0x141821, roughness:1 })
-      );
-      tier.position.set(x + Math.sign(x)*t*3, 1+t*1.2, -250);
-      grp.add(tier);
+// camera + face buffer, rebuilt each frame
+let CAM, FOCAL, VW, VH, FACES;
+function setCamera(eye, tgt){
+  const fwd = vnorm(vsub(tgt,eye));
+  const right = vnorm(vcross(fwd,[0,1,0]));
+  const up = vcross(right,fwd);
+  CAM = { eye, fwd, right, up };
+}
+function project(w){
+  const d = vsub(w, CAM.eye);
+  const cz = vdot(d, CAM.fwd);
+  if (cz <= 0.3) return null;
+  return [VW/2 + vdot(d,CAM.right)/cz*FOCAL, VH/2 - vdot(d,CAM.up)/cz*FOCAL, cz];
+}
+function addFace(pts, rgb, opts){
+  const scr = []; let zsum = 0;
+  for (const v of pts){ const p = project(v); if (!p) return; scr.push(p); zsum += p[2]; }
+  let col;
+  if (opts && opts.flat){
+    col = `rgb(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0})`;
+  } else {
+    let n = vnorm(vcross(vsub(pts[1],pts[0]), vsub(pts[2],pts[0])));
+    if (opts && opts.center){
+      const ctr = [(pts[0][0]+pts[1][0]+pts[2][0]+pts[3][0])/4,(pts[0][1]+pts[1][1]+pts[2][1]+pts[3][1])/4,(pts[0][2]+pts[1][2]+pts[2][2]+pts[3][2])/4];
+      if (vdot(n, vsub(ctr, opts.center)) < 0) n = [-n[0],-n[1],-n[2]];
     }
-    // crowd dots
-    const dotGeo = new THREE.SphereGeometry(0.22,6,6);
-    for (let i=0;i<240;i++){
-      const c = new THREE.Color().setHSL(Math.random(),0.5,0.45+Math.random()*0.2);
-      const dot = new THREE.Mesh(dotGeo, new THREE.MeshStandardMaterial({color:c}));
-      dot.position.set(x + Math.sign(x)*(1+Math.random()*7), 2.5+Math.random()*4, -10 - Math.random()*540);
-      grp.add(dot);
-    }
-    return grp;
+    const b = 0.45 + 0.55*Math.max(0, vdot(n, LIGHT));
+    col = `rgb(${Math.min(255,rgb[0]*b)|0},${Math.min(255,rgb[1]*b)|0},${Math.min(255,rgb[2]*b)|0})`;
   }
-  scene.add(stand(-15.5)); scene.add(stand(15.5));
-
-  const playerMesh = makeFigure(0xc9a24b, false);
-  scene.add(playerMesh);
-
-  Field.three = { renderer, scene, camera, sun, yardLines, playerMesh, defenderMeshes:[], turf };
-  resizeThree();
+  FACES.push({ z: zsum/pts.length, scr, col });
+}
+const BOX_FACES = [[4,5,6,7],[1,0,3,2],[0,4,7,3],[5,1,2,6],[3,7,6,2],[0,1,5,4]];
+function addBox(center, size, rgb, xform){
+  const hx=size[0]/2, hy=size[1]/2, hz=size[2]/2;
+  const signs=[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+  const c = [];
+  for (const s of signs){
+    c.push(xform([center[0]+s[0]*hx, center[1]+s[1]*hy, center[2]+s[2]*hz]));
+  }
+  const boxCtr = xform(center);
+  for (const f of BOX_FACES){
+    addFace([c[f[0]],c[f[1]],c[f[2]],c[f[3]]], rgb, { center: boxCtr });
+  }
 }
 
-function resizeThree(){
-  if (!Field.three) return;
-  const r = fieldCanvas.getBoundingClientRect();
-  if (!r.width) return;
-  Field.three.renderer.setSize(r.width, r.height, false);
-  Field.three.camera.aspect = r.width / r.height;
-  Field.three.camera.updateProjectionMatrix();
+function drawFaces(){
+  FACES.sort((a,b)=> b.z - a.z);
+  for (const f of FACES){
+    fctx.beginPath();
+    fctx.moveTo(f.scr[0][0], f.scr[0][1]);
+    for (let i=1;i<f.scr.length;i++) fctx.lineTo(f.scr[i][0], f.scr[i][1]);
+    fctx.closePath();
+    fctx.fillStyle = f.col;
+    fctx.fill();
+    fctx.lineWidth = 1; fctx.strokeStyle = f.col; fctx.stroke();   // seal seams
+  }
 }
 
-function makeDefenderMesh(){
-  const m = makeFigure(0x2b2f3a, true);
-  Field.three.scene.add(m);
-  return m;
+// ---- a boxy football player ----------------------------------------------
+function addFigure(X, Z, bodyRGB, helmetRGB, legPhase, lean, bob){
+  const swing = Math.sin(legPhase) * 0.5;
+  const base = (p)=>{ p = rotX(p, lean, [0,0,0]); return [p[0]+X, p[1]+bob, p[2]+Z]; };
+  const limb = (ang, piv)=> (p)=> base(rotX(p, ang, piv));
+  const skin = [150,108,78];
+  addBox([0,1.5,0],   [1.05,1.45,0.6], bodyRGB, base);                       // torso
+  addBox([0,2.18,0],  [1.55,0.42,0.85], bodyRGB, base);                      // shoulder pads
+  addBox([0,2.6,0.02],[0.5,0.5,0.5],   skin,    base);                       // head
+  addBox([0,2.66,0.05],[0.62,0.46,0.62], helmetRGB, base);                   // helmet
+  addBox([0,2.62,0.34],[0.5,0.18,0.12], [220,220,220], base);               // facemask
+  addBox([-0.74,1.55,0],[0.3,1.15,0.3], bodyRGB, limb(-swing,[-0.74,2.05,0]));// left arm
+  addBox([0.74,1.55,0], [0.3,1.15,0.3], bodyRGB, limb( swing,[0.74,2.05,0]));// right arm
+  addBox([-0.3,0.6,0],  [0.36,1.2,0.4], bodyRGB, limb( swing,[-0.3,1.1,0])); // left leg
+  addBox([0.3,0.6,0],   [0.36,1.2,0.4], bodyRGB, limb(-swing,[0.3,1.1,0]));  // right leg
 }
 
 // ---- phase / round flow ---------------------------------------------------
@@ -978,7 +937,7 @@ function beginFieldPhase(){
   fadeOut(()=>{
     show('field');
     fadeIn();
-    if (HAS_3D){ initThree(); resizeThree(); }
+    resizeCanvas(fieldCanvas);
     Audio.phase('field');
     titleCard("Three Sundays. Three Men.", "The League · 1998 – 2008", 1800, ()=>{
       startFieldRound(0);
@@ -986,8 +945,23 @@ function beginFieldPhase(){
   });
 }
 
+function buildCrowd(){
+  Field.crowd = [];
+  for (let side of [-1, 1]){
+    for (let z = 12; z > -480; z -= 2.4){
+      for (let row = 0; row < 3; row++){
+        const x = side * (14.5 + row*1.1);
+        const y = 2.2 + row*1.0 + (Math.random()*0.3);
+        const hue = Math.random();
+        const r = 120 + Math.random()*120, g = 120 + Math.random()*120, b = 120 + Math.random()*120;
+        Field.crowd.push([x, y, z + (Math.random()-0.5), [r*(0.6+hue*0.4), g*0.8, b*(1.1-hue*0.5)]]);
+      }
+    }
+  }
+}
+
 function startFieldRound(idx){
-  if (HAS_3D){ resizeThree(); } else { resizeCanvas(fieldCanvas); }
+  resizeCanvas(fieldCanvas);
   Field.round = idx;
   Field.timeLeft = 30;
   Field.yards = 0;
@@ -998,19 +972,13 @@ function startFieldRound(idx){
   Field.spawnTimer = 0.6;
   Field.bob = 0;
   Field.defenders = [];
-  Field.player = { x:0, z:0, vx:0 };
+  Field.player = { x:0, z:0 };
   Field.active = true;
+  buildCrowd();
 
   const p = PLAYERS[idx];
   Field.speed = p.style==='fast' ? 17 : p.style==='hard' ? 12.5 : 14.5;
   Field.lateral = p.style==='fast' ? 13 : p.style==='hard' ? 9 : 11;
-
-  // recolor player + clear old defender meshes
-  if (HAS_3D && Field.three){
-    recolorFigure(Field.three.playerMesh, p.color);
-    Field.three.playerMesh.position.set(0,0,0);
-    Field.three.defenderMeshes.forEach(m=> m.visible=false);
-  }
 
   $('hud').classList.remove('hidden');
   G.pausable = true;
@@ -1025,16 +993,6 @@ function startFieldRound(idx){
   loopField(Field.lastTs);
 }
 
-function recolorFigure(g, hex){
-  const col = new THREE.Color(hex);
-  g.traverse(o=>{
-    if (o.isMesh && o.material && o.material.color && o.material.metalness !== undefined){
-      // only the cloth/helmet (skin is non-metal handled separately by roughness 0.9)
-      if (o.material.roughness <= 0.7) o.material.color.copy(col);
-    }
-  });
-}
-
 function updateFieldHud(){
   const p = PLAYERS[Field.round];
   $('hudLeft').innerHTML = `<span class="lbl">${p.name.split(' ').slice(-1)} · ${p.pos}</span><span class="val">${Math.floor(Field.yards)} yds</span>`;
@@ -1042,14 +1000,14 @@ function updateFieldHud(){
 }
 
 function spawnDefender(){
-  const speed = 7 + Math.random()*5 + Field.round*1.4;   // closing speed
+  const speed = 7 + Math.random()*5 + Field.round*1.4;
   Field.defenders.push({
     x: (Math.random()*2-1)*LANE,
     z: Field.player.z - 38 - Math.random()*16,
     speed,
     steer: 1.6 + Math.random()*1.4,
+    legPhase: Math.random()*6,
     hit:false, gone:false,
-    mesh:null,
   });
 }
 
@@ -1058,7 +1016,7 @@ function loopField(ts){
   const dt = Math.min(0.05, (ts - Field.lastTs)/1000);
   Field.lastTs = ts;
   if (!G.paused) updateField(dt);
-  if (HAS_3D && Field.three) renderField3D(dt); else renderField2D();
+  renderField();
   Field.raf = requestAnimationFrame(loopField);
 }
 
@@ -1095,6 +1053,7 @@ function updateField(dt){
     const dx = p.x - d.x;
     d.x += Math.sign(dx)*Math.min(Math.abs(dx), d.steer*dt);
     d.z += (d.speed + fwd) * dt;       // closes the gap as player runs in
+    d.legPhase += dt*9;
     if (!d.hit && Math.abs(d.z - p.z) < 1.3 && Math.abs(d.x - p.x) < 1.3){
       handleTackle(d);
     }
@@ -1125,101 +1084,75 @@ function handleTackle(d){
   }
 }
 
-// ---- 3D rendering ---------------------------------------------------------
-function animateLegs(g, t, running){
-  if (!g.userData.legL) return;
-  const sw = running ? Math.sin(t)*0.6 : 0;
-  g.userData.legL.rotation.x = sw;
-  g.userData.legR.rotation.x = -sw;
-  g.userData.armL.rotation.x = -sw;
-  g.userData.armR.rotation.x = sw;
-}
-
-function renderField3D(dt){
-  const T = Field.three;
+// ---- render the 3D scene --------------------------------------------------
+function hexToRgb(hex){ return [(hex>>16)&255,(hex>>8)&255,hex&255]; }
+function renderField(){
+  VW = fieldCanvas.width; VH = fieldCanvas.height;
+  FOCAL = VH * 0.95;
+  FACES = [];
   const p = Field.player;
+  const pz = p.z;
 
-  // player mesh
-  const blink = (Field.invuln>0 && Math.floor(Field.invuln*14)%2===0);
-  T.playerMesh.visible = !blink;
-  T.playerMesh.position.x = p.x;
-  T.playerMesh.position.z = p.z;
-  T.playerMesh.rotation.x = Field.trucking ? 0.25 : 0.05;  // lean when trucking
-  recolorFigure(T.playerMesh, Field.trucking ? 0xd9534f : PLAYERS[Field.round].color);
-  animateLegs(T.playerMesh, Field.bob, true);
+  // sky / stadium backdrop
+  const sky = fctx.createLinearGradient(0,0,0,VH);
+  sky.addColorStop(0, "#0c1018"); sky.addColorStop(0.55, "#10161f"); sky.addColorStop(1, "#0a0c10");
+  fctx.fillStyle = sky; fctx.fillRect(0,0,VW,VH);
 
-  // defenders -> meshes (pool)
-  let mi = 0;
+  // camera (angled, slightly behind — high three-quarter view)
+  const shx = (Math.random()-0.5)*Field.shake*1.4;
+  const shy = (Math.random()-0.5)*Field.shake*1.4;
+  setCamera([p.x*0.4 + shx, 11 + shy, pz + 12.5], [p.x*0.2, 1.4, pz - 9]);
+
+  const zNear = pz + 14, zFar = pz - 92;
+
+  // ground stripes (mowed turf)
+  for (let z = Math.ceil(zNear/5)*5; z > zFar; z -= 5){
+    const shade = (Math.floor(z/5)%2===0) ? [34,108,52] : [26,86,42];
+    addFace([[-13,0,z],[13,0,z],[13,0,z-5],[-13,0,z-5]], shade, {});
+  }
+  // sidelines
+  for (let side of [-12.4, 12.4]){
+    addFace([[side,0.02,zNear],[side+0.4,0.02,zNear],[side+0.4,0.02,zFar],[side,0.02,zFar]], [235,235,235], {flat:true});
+  }
+  // yard lines every 10
+  for (let z = Math.ceil(zNear/10)*10; z > zFar; z -= 10){
+    addFace([[-12,0.03,z+0.18],[12,0.03,z+0.18],[12,0.03,z-0.18],[-12,0.03,z-0.18]], [225,225,225], {flat:true});
+  }
+  // stand walls (dark) behind the crowd, both sides
+  for (let side of [-1,1]){
+    const x = side*18.5;
+    addFace([[x,0,zNear],[x,9,zNear],[x,9,zFar],[x,0,zFar]], [16,20,28], {flat:true});
+  }
+  // crowd (only those in view)
+  for (const c of Field.crowd){
+    if (c[2] > zNear || c[2] < zFar) continue;
+    const x=c[0], y=c[1], z=c[2], rgb=c[3];
+    addFace([[x,y-0.32,z-0.32],[x,y-0.32,z+0.32],[x,y+0.32,z+0.32],[x,y+0.32,z-0.32]], rgb, {flat:true});
+  }
+
+  // defenders (boxy figures)
   for (const d of Field.defenders){
-    let m = T.defenderMeshes[mi];
-    if (!m){ m = makeDefenderMesh(); T.defenderMeshes[mi] = m; }
-    m.visible = true;
-    m.position.set(d.x, 0, d.z);
-    m.rotation.y = Math.PI;          // facing the runner
-    animateLegs(m, Field.bob*0.9 + mi, true);
-    mi++;
-  }
-  for (; mi < T.defenderMeshes.length; mi++) T.defenderMeshes[mi].visible = false;
-
-  // recycle yard lines around the player
-  const span = T.yardLines.length*10;
-  for (const line of T.yardLines){
-    while (line.position.z > p.z + 12) line.position.z -= span;
-    while (line.position.z < p.z - span + 12) line.position.z += span;
+    if (d.z < zFar || d.z > zNear) continue;
+    addFigure(d.x, d.z, [54,60,72], [40,46,58], d.legPhase, 0, 0);
   }
 
-  // camera: high, slightly behind, Brawl-Stars angle
-  const shx = (Math.random()-0.5)*Field.shake;
-  const shy = (Math.random()-0.5)*Field.shake;
-  T.camera.position.set(p.x*0.45 + shx, 13 + shy, p.z + 13);
-  T.camera.lookAt(p.x*0.25, 1.6, p.z - 9);
-
-  // flash overlay via fog/background tint
-  T.renderer.render(T.scene, T.camera);
-
-  // 2D flash on top of the webgl canvas isn't possible on same canvas;
-  // emulate by briefly lightening background
-  if (Field.flash>0){
-    T.scene.background.setRGB(0.04+Field.flash*0.5, 0.05+Field.flash*0.5, 0.06+Field.flash*0.5);
-  } else {
-    T.scene.background.setHex(0x0a0c10);
-  }
-}
-
-// ---- 2D fallback rendering ------------------------------------------------
-function renderField2D(){
-  const w = fieldCanvas.width, h = fieldCanvas.height;
-  const p = Field.player;
-  const cx = w/2, baseY = h*0.74;
-  const scaleX = w/(LANE*2.4);
-  const depth = 9;            // px per forward unit
-  fctx.save();
-  if (Field.shake>0.05) fctx.translate((Math.random()-0.5)*Field.shake*18,(Math.random()-0.5)*Field.shake*18);
-  fctx.fillStyle = "#1d5a2a"; fctx.fillRect(-30,-30,w+60,h+60);
-  fctx.strokeStyle="rgba(255,255,255,0.18)"; fctx.lineWidth=3;
-  const off = ((-p.z*depth)%80);
-  for (let y=-80;y<h+80;y+=80){ const yy=y+off; fctx.beginPath();fctx.moveTo(0,yy);fctx.lineTo(w,yy);fctx.stroke(); }
-  fctx.fillStyle="rgba(0,0,0,0.05)"; fctx.fillRect(0,0,14,h); fctx.fillRect(w-14,0,14,h);
-  // defenders
-  for (const d of Field.defenders){
-    const sx = cx + d.x*scaleX;
-    const sy = baseY - (p.z - d.z)*depth;
-    if (sy<-30||sy>h+30) continue;
-    fctx.fillStyle="#2b2f3a"; fctx.beginPath(); fctx.arc(sx,sy,15,0,Math.PI*2); fctx.fill();
-    fctx.fillStyle="#c0c4cc"; fctx.fillRect(sx-6,sy-4,12,8);
-  }
-  // player
+  // player (skip on invuln blink frames)
   const blink = (Field.invuln>0 && Math.floor(Field.invuln*14)%2===0);
   if (!blink){
-    fctx.fillStyle = Field.trucking ? "#d9534f" : PLAYERS[Field.round].color;
-    fctx.beginPath(); fctx.arc(cx+p.x*scaleX, baseY, 16, 0, Math.PI*2); fctx.fill();
-    fctx.fillStyle="#fff"; fctx.fillRect(cx+p.x*scaleX-6, baseY-4, 12, 8);
+    const body = Field.trucking ? [200,70,66] : hexToRgb(parseInt(PLAYERS[Field.round].color.slice(1),16));
+    const lean = Field.trucking ? 0.32 : 0.12;
+    const bob = Math.abs(Math.sin(Field.bob))*0.12;
+    addFigure(p.x, p.z, body, body, Field.bob, lean, bob);
   }
-  fctx.restore();
-  if (Field.flash>0){ fctx.fillStyle=`rgba(255,255,255,${Field.flash*0.4})`; fctx.fillRect(0,0,w,h); }
-  const vg = fctx.createLinearGradient(0,0,0,h*0.25);
-  vg.addColorStop(0,"rgba(0,0,0,0.45)"); vg.addColorStop(1,"rgba(0,0,0,0)");
-  fctx.fillStyle=vg; fctx.fillRect(0,0,w,h*0.25);
+
+  drawFaces();
+
+  // impact flash + crowd vignette
+  if (Field.flash>0){ fctx.fillStyle=`rgba(255,255,255,${Field.flash*0.4})`; fctx.fillRect(0,0,VW,VH); }
+  const vg = fctx.createLinearGradient(0,0,0,VH);
+  vg.addColorStop(0,"rgba(0,0,0,0.3)"); vg.addColorStop(0.3,"rgba(0,0,0,0)");
+  vg.addColorStop(0.85,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.35)");
+  fctx.fillStyle=vg; fctx.fillRect(0,0,VW,VH);
 }
 
 function endFieldRound(){
@@ -1879,9 +1812,7 @@ function isTouch(){ return ('ontouchstart' in window) || navigator.maxTouchPoint
 if (isTouch()) document.body.classList.add('touch');
 
 function resizeAll(){
-  [titleCanvas, labCanvas].forEach(resizeCanvas);
-  if (HAS_3D && Field.three){ resizeThree(); }
-  else { resizeCanvas(fieldCanvas); }
+  [titleCanvas, fieldCanvas, labCanvas].forEach(resizeCanvas);
 }
 window.addEventListener('resize', resizeAll);
 
