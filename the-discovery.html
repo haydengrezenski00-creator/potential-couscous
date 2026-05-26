@@ -153,19 +153,20 @@
   /* Tutorial hint */
   #hint {
     position: absolute;
-    bottom: 18%; left: 50%; transform: translateX(-50%);
-    background: rgba(8,10,14,0.85);
+    top: 64px; left: 50%; transform: translateX(-50%);
+    background: rgba(8,10,14,0.9);
     border: 1px solid var(--accent);
     color: var(--ink);
-    padding: 12px 20px;
+    padding: 10px 16px;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 13px;
     z-index: 35;
-    max-width: 80%;
+    max-width: 92%;
     text-align: center;
     opacity: 0;
     transition: opacity .5s;
     pointer-events: none;
+    line-height: 1.35;
   }
   #hint.show { opacity: 1; }
 
@@ -189,40 +190,45 @@
   /* Mobile touch controls */
   #touchpad {
     position: absolute; bottom: 0; left: 0; right: 0;
-    height: 38%;
+    height: 280px;
     display: none;
     z-index: 25;
     pointer-events: none;
   }
   .dpad {
-    position: absolute; bottom: 20px; left: 20px;
-    width: 150px; height: 150px;
+    position: absolute; bottom: 20px; left: 14px;
+    width: 220px; height: 220px;
     pointer-events: auto;
   }
   .dbtn {
     position: absolute;
-    background: rgba(201,162,75,0.18);
-    border: 1px solid rgba(201,162,75,0.4);
-    border-radius: 8px;
-    width: 48px; height: 48px;
+    background: rgba(201,162,75,0.32);
+    border: 2px solid rgba(201,162,75,0.7);
+    border-radius: 12px;
+    width: 72px; height: 72px;
     display:flex; align-items:center; justify-content:center;
-    color: var(--ink); font-size: 20px;
+    color: var(--ink); font-size: 28px;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   }
-  .dbtn.up { top: 0; left: 51px; }
-  .dbtn.down { bottom: 0; left: 51px; }
-  .dbtn.left { top: 51px; left: 0; }
-  .dbtn.right { top: 51px; right: 0; }
+  .dbtn:active { background: rgba(201,162,75,0.55); }
+  .dbtn.up    { top: 0;    left: 74px; }
+  .dbtn.down  { bottom: 0; left: 74px; }
+  .dbtn.left  { top: 74px; left: 0; }
+  .dbtn.right { top: 74px; right: 0; }
   .truckbtn {
-    position: absolute; bottom: 30px; right: 24px;
+    position: absolute; bottom: 30px; right: 22px;
     pointer-events: auto;
-    background: rgba(217,83,79,0.25);
-    border: 1px solid rgba(217,83,79,0.6);
+    background: rgba(217,83,79,0.38);
+    border: 3px solid rgba(217,83,79,0.85);
     color: var(--ink);
     border-radius: 50%;
-    width: 96px; height: 96px;
-    font-size: 13px; letter-spacing: 1px;
+    width: 130px; height: 130px;
+    font-size: 16px; font-weight: bold; letter-spacing: 1px;
     text-transform: uppercase;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   }
+  .truckbtn:active { background: rgba(217,83,79,0.6); }
   body.touch #touchpad.show { display: block; }
 
   /* Lab tools */
@@ -900,7 +906,8 @@ function addFace(pts, rgb, opts){
   for (const v of pts){ const p = project(v); if (!p) return; scr.push(p); zsum += p[2]; }
   let col;
   if (opts && opts.flat){
-    col = `rgb(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0})`;
+    const a = (rgb.length>=4) ? rgb[3] : 1;
+    col = (a<1) ? `rgba(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0},${a})` : `rgb(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0})`;
   } else {
     let n = vnorm(vcross(vsub(pts[1],pts[0]), vsub(pts[2],pts[0])));
     if (opts && opts.center){
@@ -940,20 +947,38 @@ function drawFaces(){
 }
 
 // ---- a boxy football player ----------------------------------------------
+function addShadow(X, Z){
+  // soft contact shadow on the turf, slightly elongated by the light angle
+  addFace([[X-0.85,0.05,Z-0.55],[X+0.85,0.05,Z-0.55],[X+0.95,0.05,Z+0.55],[X-0.75,0.05,Z+0.55]], [0,0,0,0.42], {flat:true});
+}
 function addFigure(X, Z, bodyRGB, helmetRGB, legPhase, lean, bob){
-  const swing = Math.sin(legPhase) * 0.5;
+  const swing = Math.sin(legPhase) * 0.55;
   const base = (p)=>{ p = rotX(p, lean, [0,0,0]); return [p[0]+X, p[1]+bob, p[2]+Z]; };
   const limb = (ang, piv)=> (p)=> base(rotX(p, ang, piv));
-  const skin = [150,108,78];
-  addBox([0,1.5,0],   [1.05,1.45,0.6], bodyRGB, base);                       // torso
-  addBox([0,2.18,0],  [1.55,0.42,0.85], bodyRGB, base);                      // shoulder pads
-  addBox([0,2.6,0.02],[0.5,0.5,0.5],   skin,    base);                       // head
-  addBox([0,2.66,0.05],[0.62,0.46,0.62], helmetRGB, base);                   // helmet
-  addBox([0,2.62,0.34],[0.5,0.18,0.12], [220,220,220], base);               // facemask
-  addBox([-0.74,1.55,0],[0.3,1.15,0.3], bodyRGB, limb(-swing,[-0.74,2.05,0]));// left arm
-  addBox([0.74,1.55,0], [0.3,1.15,0.3], bodyRGB, limb( swing,[0.74,2.05,0]));// right arm
-  addBox([-0.3,0.6,0],  [0.36,1.2,0.4], bodyRGB, limb( swing,[-0.3,1.1,0])); // left leg
-  addBox([0.3,0.6,0],   [0.36,1.2,0.4], bodyRGB, limb(-swing,[0.3,1.1,0]));  // right leg
+  const skin = [168,118,86];
+  const trim = [240,240,238];                                                 // jersey trim / numbers
+  const cleat = [22,24,30];
+  const sleeve = bodyRGB.map(c=> Math.max(0, c*0.78));
+  // body
+  addBox([0,1.5,0],     [1.05,1.45,0.62], bodyRGB, base);                     // torso
+  addBox([0,1.6,0.32],  [0.7,0.32,0.06],  trim,    base);                     // chest stripe (mock number band)
+  addBox([0,2.18,0],    [1.55,0.42,0.86], bodyRGB, base);                     // shoulder pads
+  addBox([0,2.4,0],     [1.55,0.07,0.86], trim,    base);                     // pad trim line
+  // head + helmet
+  addBox([0,2.6,0.02],  [0.5,0.5,0.5],   skin,    base);                      // head
+  addBox([0,2.66,0.05], [0.64,0.48,0.64], helmetRGB, base);                   // helmet
+  addBox([0,2.62,0.35], [0.5,0.18,0.14], [225,225,225], base);                // facemask
+  addBox([0,2.78,0.34], [0.5,0.04,0.14], [225,225,225], base);                // facemask top bar
+  // arms (sleeves darker)
+  addBox([-0.74,1.75,0],[0.32,0.55,0.32], bodyRGB, limb(-swing,[-0.74,2.05,0])); // left upper
+  addBox([-0.74,1.15,0],[0.3,0.7,0.3],    sleeve,  limb(-swing,[-0.74,2.05,0])); // left lower
+  addBox([0.74,1.75,0], [0.32,0.55,0.32], bodyRGB, limb( swing,[0.74,2.05,0]));
+  addBox([0.74,1.15,0], [0.3,0.7,0.3],    sleeve,  limb( swing,[0.74,2.05,0]));
+  // legs (pants then cleats)
+  addBox([-0.3,0.65,0], [0.38,1.15,0.42], bodyRGB, limb( swing,[-0.3,1.1,0]));
+  addBox([-0.3,0.08,0.05],[0.42,0.12,0.55], cleat, limb( swing,[-0.3,1.1,0]));
+  addBox([0.3,0.65,0],  [0.38,1.15,0.42], bodyRGB, limb(-swing,[0.3,1.1,0]));
+  addBox([0.3,0.08,0.05],[0.42,0.12,0.55], cleat,  limb(-swing,[0.3,1.1,0]));
 }
 
 // ---- phase / round flow ---------------------------------------------------
@@ -1173,9 +1198,14 @@ function renderField(){
   for (let side of [-12.4, 12.4]){
     addFace([[side,0.02,zNear],[side+0.4,0.02,zNear],[side+0.4,0.02,zFar],[side,0.02,zFar]], [235,235,235], {flat:true});
   }
-  // yard lines every 10
+  // yard lines every 10 + hash marks every 5
   for (let z = Math.ceil(zNear/10)*10; z > zFar; z -= 10){
     addFace([[-12,0.03,z+0.18],[12,0.03,z+0.18],[12,0.03,z-0.18],[-12,0.03,z-0.18]], [225,225,225], {flat:true});
+  }
+  for (let z = Math.ceil(zNear/5)*5; z > zFar; z -= 5){
+    for (const hx of [-3.2, 3.2]){
+      addFace([[hx-0.5,0.035,z+0.13],[hx+0.5,0.035,z+0.13],[hx+0.5,0.035,z-0.13],[hx-0.5,0.035,z-0.13]], [225,225,225], {flat:true});
+    }
   }
   // stand walls (dark) behind the crowd, both sides
   for (let side of [-1,1]){
@@ -1196,14 +1226,16 @@ function renderField(){
     addBox([it.x, yb, it.z], [0.6,0.36,0.36], [150,84,42], q=>q);
   }
 
-  // defenders (boxy figures, per-round opponent colors)
+  // defenders (boxy figures, per-round opponent colors) + ground shadow
   for (const d of Field.defenders){
     if (d.z < zFar || d.z > zNear) continue;
+    addShadow(d.x, d.z);
     addFigure(d.x, d.z, Field.cfg.defColor, Field.cfg.defHelm, d.legPhase, 0, 0);
   }
 
-  // player (skip on invuln blink frames)
+  // player (skip figure on invuln blink, but keep shadow so position reads)
   const blink = (Field.invuln>0 && Math.floor(Field.invuln*14)%2===0);
+  addShadow(p.x, p.z);
   if (!blink){
     const body = Field.trucking ? [200,70,66] : hexToRgb(parseInt(PLAYERS[Field.round].color.slice(1),16));
     const lean = Field.trucking ? 0.32 : 0.12;
@@ -1367,9 +1399,9 @@ function updateLabStep(){
   const p = PLAYERS[Lab.index];
   const name = p.name.split(' ').slice(-1)[0];
   if (Lab.step===1){
-    $('labStep').innerHTML = `Brain tissue of <b>${name}</b>. Step 1 of 2 — press <b>Apply Stain</b> (below) to reveal the proteins.`;
+    $('labStep').innerHTML = `Brain tissue of <b>${name}</b>. <b>Tap anywhere</b> to apply the stain that reveals tau proteins.`;
   } else {
-    $('labStep').innerHTML = `Step 2 of 2 — tap each <b>dark tau deposit</b> (ringed in gold). Log <b>${Lab.needed}</b> to confirm the diagnosis.`;
+    $('labStep').innerHTML = `Tap each <b>dark tau deposit</b> (gold ring). Log <b>${Lab.needed}</b> to confirm the diagnosis.`;
   }
 }
 
@@ -1459,15 +1491,23 @@ function renderLab(){
   }
 }
 
+function applyStain(){
+  if (Lab.stain) return;
+  Lab.stain = true;
+  Lab.step = 2;
+  $('toolStain').textContent = "Stain: ON";
+  $('toolStain').classList.add('on');
+  $('toolStain').classList.remove('pulse');
+  updateLabStep();
+  if (Lab.index===0) showHint("Now tap each dark deposit ringed in gold.");
+  Audio.sfxDing();
+}
 function labTap(px,py){
   if (!Lab.active) return;
-  if (!Lab.stain){
-    showHint("Press “Apply Stain” first — the proteins are invisible without it.");
-    return;
-  }
+  if (!Lab.stain){ applyStain(); return; }    // tap anywhere applies the stain
   for (const sp of Lab.spots){
     if (sp.found) continue;
-    if (Math.hypot(sp.x-px, sp.y-py) < sp.r+18){
+    if (Math.hypot(sp.x-px, sp.y-py) < sp.r+24){
       sp.found = true;
       Lab.found++;
       Audio.sfxDing();
@@ -1836,25 +1876,7 @@ labCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos
 labCanvas.addEventListener('touchmove', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); }, {passive:false});
 labCanvas.addEventListener('touchend', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerUp(p.x,p.y); }, {passive:false});
 
-$('toolStain').onclick = ()=>{
-  if (!Lab.stain){
-    Lab.stain = true;
-    Lab.step = 2;
-    $('toolStain').textContent = "Stain: ON";
-    $('toolStain').classList.add('on');
-    $('toolStain').classList.remove('pulse');
-    updateLabStep();
-    if (Lab.index===0) showHint("Now tap each dark deposit ringed in gold.");
-    Audio.sfxDing();
-  } else {
-    Lab.stain = false;
-    Lab.step = 1;
-    $('toolStain').textContent = "Apply Stain";
-    $('toolStain').classList.remove('on');
-    $('toolStain').classList.add('pulse');
-    updateLabStep();
-  }
-};
+$('toolStain').onclick = ()=> applyStain();
 $('toolMag').onclick = ()=>{
   Lab.mag = !Lab.mag;
   $('toolMag').textContent = "Magnifier: " + (Lab.mag?"ON":"OFF");
