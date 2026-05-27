@@ -1022,6 +1022,8 @@ function startFieldRound(idx){
   Field.invuln = 1.2;
   Field.spawnTimer = 0.6;
   Field.bob = 0;
+  Field.blur = 0;
+  fieldCanvas.style.filter = 'none';
   Field.defenders = [];
   Field.items = [];
   Field.itemTimer = 0.8;
@@ -1094,6 +1096,7 @@ function updateField(dt){
   Field.flash = Math.max(0, Field.flash - dt*3);
   Field.shake *= 0.86;
   Field.bob += dt*12;
+  Field.blur = Math.max(0, Field.blur - 0.08*dt);   // barely decays; mostly cumulative
 
   const p = Field.player;
   let ix = 0;
@@ -1155,13 +1158,15 @@ function handleTackle(d){
     careers[Field.round].impact += (p.style==='hard'?14:11);
     Field.yards += 8;
     Field.shake = 0.9; Field.flash = 1;
+    Field.blur += 1.4;                 // a big hit you delivered still rattles you
     Audio.sfxHit(2);
   } else {
     if (Field.invuln>0){ d.hit=false; d.gone=true; return; }
     careers[Field.round].impact += (p.style==='hard'?9:7);
     Field.invuln = 0.85;
     Field.shake = 0.7; Field.flash = 0.8;
-    Field.player.z += 2.2;             // knocked back
+    Field.blur += 1.0;                 // taking a tackle adds a bit less than trucking
+    Field.player.z += 2.2;
     Audio.sfxHit(1);
   }
 }
@@ -1251,11 +1256,22 @@ function renderField(){
   vg.addColorStop(0,"rgba(0,0,0,0.3)"); vg.addColorStop(0.3,"rgba(0,0,0,0)");
   vg.addColorStop(0.85,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.35)");
   fctx.fillStyle=vg; fctx.fillRect(0,0,VW,VH);
+
+  // cumulative concussion vision: blur + desaturation grow with every hit
+  const bp = Math.min(8, Field.blur);
+  if (bp > 0.05){
+    const sat = Math.max(0.5, 1 - bp*0.08);
+    const bright = Math.max(0.75, 1 - bp*0.03);
+    fieldCanvas.style.filter = `blur(${bp.toFixed(2)}px) saturate(${sat.toFixed(2)}) brightness(${bright.toFixed(2)})`;
+  } else {
+    fieldCanvas.style.filter = 'none';
+  }
 }
 
 function endFieldRound(){
   Field.active = false;
   cancelAnimationFrame(Field.raf);
+  fieldCanvas.style.filter = 'none';
   $('touchpad').classList.remove('show');
   $('hud').classList.add('hidden');
   hideHint();
@@ -1866,7 +1882,9 @@ function labPointerUp(px,py){
 }
 function getPos(e, canvas){
   const r = canvas.getBoundingClientRect();
-  const t = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
+  const t = (e.touches && e.touches.length) ? e.touches[0]
+          : (e.changedTouches && e.changedTouches.length) ? e.changedTouches[0]
+          : e;
   return { x:(t.clientX-r.left), y:(t.clientY-r.top) };
 }
 labCanvas.addEventListener('mousedown', e=>{ const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); });
