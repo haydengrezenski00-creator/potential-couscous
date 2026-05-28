@@ -68,8 +68,12 @@
     margin: 0 0 6px;
     color: var(--ink);
     text-shadow: 0 4px 30px rgba(201,162,75,0.25);
+    animation: titleIn 1.4s cubic-bezier(.16,.84,.2,1) both;
   }
-  .subtitle { color: var(--accent); letter-spacing: 3px; font-size: 13px; text-transform: uppercase; margin-bottom: 28px; }
+  @keyframes titleIn { from { letter-spacing: 16px; opacity: 0; filter: blur(6px);} to { letter-spacing: 4px; opacity: 1; filter: blur(0);} }
+  .subtitle { color: var(--accent); letter-spacing: 3px; font-size: 13px; text-transform: uppercase; margin-bottom: 28px;
+    animation: fadeUp 1.6s .5s ease-out both; }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(8px);} to { opacity:1; transform: translateY(0);} }
   .credit { color: var(--muted); font-size: 12px; font-style: italic; max-width: 420px; line-height: 1.6; margin-top: 10px;}
 
   button.btn {
@@ -84,10 +88,11 @@
     cursor: pointer;
     margin: 8px;
     border-radius: 2px;
-    transition: background .2s, color .2s;
+    transition: background .2s, color .2s, transform .15s, box-shadow .2s;
     min-width: 160px;
   }
-  button.btn:hover, button.btn:active { background: var(--accent); color: #14110a; }
+  button.btn:hover { background: var(--accent); color: #14110a; transform: translateY(-1px); box-shadow: 0 6px 22px rgba(201,162,75,0.28); }
+  button.btn:active { transform: translateY(0); }
   button.btn.primary { background: var(--accent); color: #14110a; }
   button.btn.primary:hover { background: #e0bb63; }
 
@@ -138,8 +143,10 @@
     letter-spacing: 1px;
     backdrop-filter: blur(2px);
   }
-  .hud-box .lbl { color: var(--muted); font-size: 10px; text-transform: uppercase; display:block; }
-  .hud-box .val { font-size: 18px; }
+  .hud-box .lbl { color: var(--muted); font-size: 10px; text-transform: uppercase; display:block; letter-spacing: 1.5px; }
+  .hud-box .val { font-size: 20px; font-weight: bold; font-variant-numeric: tabular-nums; }
+  .hud-box .tbar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .hud-box .tbar i { display:block; height:100%; background: linear-gradient(90deg, var(--accent), #e0bb63); transition: width .2s linear; }
 
   #pauseBtn {
     pointer-events: auto;
@@ -342,12 +349,15 @@
   /* Pause menu */
   #pauseMenu {
     position: absolute; inset: 0;
-    background: rgba(4,5,8,0.92);
+    background: rgba(4,5,8,0.78);
+    backdrop-filter: blur(10px) brightness(0.55);
+    -webkit-backdrop-filter: blur(10px) brightness(0.55);
     display: none; flex-direction: column; align-items: center; justify-content: center;
     z-index: 90;
   }
-  #pauseMenu.show { display: flex; }
-  #pauseMenu h2 { letter-spacing: 4px; color: var(--accent); }
+  #pauseMenu.show { display: flex; animation: fadeIn .3s ease-out; }
+  @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+  #pauseMenu h2 { letter-spacing: 6px; color: var(--accent); font-size: 30px; margin-bottom: 8px; }
 
   /* Ending */
   #ending {
@@ -355,9 +365,16 @@
     padding: 30px 22px;
     display: flex; flex-direction: column; align-items: center;
   }
-  #ending .eName { font-size: clamp(30px,7vw,52px); color: var(--accent); letter-spacing: 2px; margin: 8px 0 2px; text-align:center; }
-  #ending .eTag { color: var(--muted); font-style: italic; margin-bottom: 20px; }
-  #ending .epilogue { max-width: 600px; font-size: 17px; line-height: 1.7; text-align: center; margin-bottom: 24px; }
+  @keyframes endIn { from { opacity:0; transform: translateY(16px); filter: blur(4px);} to { opacity:1; transform: translateY(0); filter: blur(0);} }
+  #ending .eName { font-size: clamp(30px,7vw,52px); color: var(--accent); letter-spacing: 2px; margin: 8px 0 2px; text-align:center;
+    animation: endIn 1s ease-out both; }
+  #ending .eTag { color: var(--muted); font-style: italic; margin-bottom: 20px;
+    animation: endIn 1s .25s ease-out both; }
+  #ending .estats { animation: endIn 1s .5s ease-out both; }
+  #ending .epilogue { max-width: 600px; font-size: 17px; line-height: 1.7; text-align: center; margin-bottom: 24px;
+    animation: endIn 1s .75s ease-out both; }
+  #ending .recap { animation: endIn 1s 1s ease-out both; }
+  #ending #replayBtn { animation: endIn 1s 1.4s ease-out both; }
   #ending .estats { display: flex; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; justify-content: center; }
   #ending .estat { text-align: center; }
   #ending .estat .n { font-size: 30px; color: var(--accent); }
@@ -1023,6 +1040,8 @@ function startFieldRound(idx){
   Field.spawnTimer = 0.6;
   Field.bob = 0;
   Field.blur = 0;
+  Field.yardsDisplay = 0;
+  Field.particles = [];
   fieldCanvas.style.filter = 'none';
   Field.defenders = [];
   Field.items = [];
@@ -1053,8 +1072,10 @@ function startFieldRound(idx){
 
 function updateFieldHud(){
   const p = PLAYERS[Field.round];
-  $('hudLeft').innerHTML = `<span class="lbl">${p.name.split(' ').slice(-1)} · ${p.pos}</span><span class="val">${Math.floor(Field.yards)} yds</span>`;
-  $('hudMid').innerHTML = `<span class="lbl">Round ${Field.round+1}/3 · ${p.debut+Field.round}</span><span class="val">${Math.ceil(Field.timeLeft)}s</span>`;
+  const yards = Math.floor(Field.yardsDisplay);
+  const tpct = Math.max(0, Math.min(100, (Field.timeLeft/30)*100));
+  $('hudLeft').innerHTML = `<span class="lbl">${p.name.split(' ').slice(-1)} · ${p.pos}</span><span class="val">${yards} yds</span>`;
+  $('hudMid').innerHTML = `<span class="lbl">Round ${Field.round+1}/3 · ${p.debut+Field.round}</span><span class="val">${Math.ceil(Field.timeLeft)}s</span><div class="tbar"><i style="width:${tpct.toFixed(1)}%"></i></div>`;
 }
 
 function pushDefender(x){
@@ -1097,6 +1118,15 @@ function updateField(dt){
   Field.shake *= 0.86;
   Field.bob += dt*12;
   Field.blur = Math.max(0, Field.blur - 0.08*dt);   // barely decays; mostly cumulative
+  Field.yardsDisplay += (Field.yards - Field.yardsDisplay) * Math.min(1, dt*7);
+
+  // update hit particles (gravity, fade)
+  for (const pt of Field.particles){
+    pt.x += pt.vx*dt; pt.y += pt.vy*dt; pt.z += pt.vz*dt;
+    pt.vy -= 9.5*dt;
+    pt.life -= dt;
+  }
+  Field.particles = Field.particles.filter(pt=> pt.life > 0 && pt.y > 0.04);
 
   const p = Field.player;
   let ix = 0;
@@ -1150,6 +1180,18 @@ function updateField(dt){
   if (Field.timeLeft <= 0) endFieldRound();
 }
 
+function spawnHitParticles(x, z, n, color){
+  for (let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2;
+    const v = 2.5 + Math.random()*4;
+    Field.particles.push({
+      x, y: 1.3 + Math.random()*0.9, z,
+      vx: Math.cos(a)*v, vy: 3 + Math.random()*4, vz: Math.sin(a)*v*0.6,
+      life: 0.55 + Math.random()*0.3, color,
+    });
+  }
+}
+
 function handleTackle(d){
   const p = PLAYERS[Field.round];
   d.hit = true; d.gone = true;
@@ -1158,14 +1200,16 @@ function handleTackle(d){
     careers[Field.round].impact += (p.style==='hard'?14:11);
     Field.yards += 8;
     Field.shake = 0.9; Field.flash = 1;
-    Field.blur += 1.4;                 // a big hit you delivered still rattles you
+    Field.blur += 1.4;
+    spawnHitParticles(d.x, d.z, 16, [255,180,90]);
     Audio.sfxHit(2);
   } else {
     if (Field.invuln>0){ d.hit=false; d.gone=true; return; }
     careers[Field.round].impact += (p.style==='hard'?9:7);
     Field.invuln = 0.85;
     Field.shake = 0.7; Field.flash = 0.8;
-    Field.blur += 1.0;                 // taking a tackle adds a bit less than trucking
+    Field.blur += 1.0;
+    spawnHitParticles(d.x, d.z, 12, [225,215,185]);
     Field.player.z += 2.2;
     Audio.sfxHit(1);
   }
@@ -1217,11 +1261,28 @@ function renderField(){
     const x = side*18.5;
     addFace([[x,0,zNear],[x,9,zNear],[x,9,zFar],[x,0,zFar]], [16,20,28], {flat:true});
   }
-  // crowd (only those in view)
+  // crowd (only those in view), with a subtle sway
+  const sw = Field.bob * 0.5;
   for (const c of Field.crowd){
     if (c[2] > zNear || c[2] < zFar) continue;
-    const x=c[0], y=c[1], z=c[2], rgb=c[3];
+    const x=c[0], z=c[2], rgb=c[3];
+    const y = c[1] + Math.sin(sw + c[2]*0.4 + c[0])*0.05;
     addFace([[x,y-0.32,z-0.32],[x,y-0.32,z+0.32],[x,y+0.32,z+0.32],[x,y+0.32,z-0.32]], rgb, {flat:true});
+  }
+
+  // stadium light masts (a few in view), placed beyond the stands
+  for (const sx of [-1, 1]){
+    for (const dz of [-50, -10, 30]){
+      const z = pz + dz;
+      if (z > zNear || z < zFar) continue;
+      const x = sx*19;
+      // mast (thin dark column)
+      addFace([[x-0.12,1,z],[x+0.12,1,z],[x+0.12,11.5,z],[x-0.12,11.5,z]], [38,42,52], {flat:true});
+      // lamp head
+      addFace([[x-0.65,11.3,z-0.1],[x+0.65,11.3,z-0.1],[x+0.65,11.9,z-0.1],[x-0.65,11.9,z-0.1]], [255,236,194], {flat:true});
+      // glow halo (translucent quad above)
+      addFace([[x-1.4,11.6,z-0.2],[x+1.4,11.6,z-0.2],[x+1.4,13,z-0.2],[x-1.4,13,z-0.2]], [255,232,180,0.18], {flat:true});
+    }
   }
 
   // footballs to catch (receiver round)
@@ -1246,6 +1307,15 @@ function renderField(){
     const lean = Field.trucking ? 0.32 : 0.12;
     const bob = Math.abs(Math.sin(Field.bob))*0.12;
     addFigure(p.x, p.z, body, body, Field.bob, lean, bob);
+  }
+
+  // hit particles (dust + sparks)
+  for (const pt of Field.particles){
+    if (pt.z < zFar || pt.z > zNear) continue;
+    const a = Math.max(0.0, Math.min(1, pt.life/0.5));
+    const s = 0.16 + (1-a)*0.06;
+    addFace([[pt.x-s,pt.y-s,pt.z],[pt.x+s,pt.y-s,pt.z],[pt.x+s,pt.y+s,pt.z],[pt.x-s,pt.y+s,pt.z]],
+            [pt.color[0],pt.color[1],pt.color[2], 0.35 + 0.55*a], {flat:true});
   }
 
   drawFaces();
@@ -1663,25 +1733,48 @@ function renderMeters(instant){
 }
 function clamp(v){ return Math.max(0,Math.min(100,v)); }
 
+let _typeTimer = null;
+let _typeSkip = null;
+function typeOut(el, text, onDone){
+  if (_typeTimer){ clearInterval(_typeTimer); _typeTimer = null; }
+  el.textContent = '';
+  let i = 0;
+  _typeSkip = ()=>{
+    if (!_typeTimer) return;
+    clearInterval(_typeTimer); _typeTimer = null; _typeSkip = null;
+    el.textContent = text;
+    if (onDone) onDone();
+  };
+  _typeTimer = setInterval(()=>{
+    i++;
+    el.textContent = text.slice(0, i);
+    if (i >= text.length){
+      clearInterval(_typeTimer); _typeTimer = null; _typeSkip = null;
+      if (onDone) onDone();
+    }
+  }, 20);
+}
+
 function showEncounter(idx){
   G.pushIndex = idx;
   pushStep = 0;
   const e = ENCOUNTERS[idx];
   $('speaker').textContent = e.speaker;
   $('speakerRole').textContent = e.role;
-  $('dialogueText').textContent = e.lines[0];
-  const cont = $('choices');
-  cont.innerHTML = '';
-  e.choices.forEach((c,i)=>{
-    const b = document.createElement('button');
-    b.className='choice';
-    const tags = [];
-    if (c.eff.truth) tags.push(`Truth ${c.eff.truth>0?'+':''}${c.eff.truth}`);
-    if (c.eff.cred) tags.push(`Credibility ${c.eff.cred>0?'+':''}${c.eff.cred}`);
-    if (c.eff.cost) tags.push(`Cost ${c.eff.cost>0?'+':''}${c.eff.cost}`);
-    b.innerHTML = `${c.text}<span class="tag">${tags.join(' · ')}</span>`;
-    b.onclick = ()=> choosePush(idx,i);
-    cont.appendChild(b);
+  $('choices').innerHTML = '';
+  typeOut($('dialogueText'), e.lines[0], ()=>{
+    const cont = $('choices');
+    e.choices.forEach((c,i)=>{
+      const b = document.createElement('button');
+      b.className='choice';
+      const tags = [];
+      if (c.eff.truth) tags.push(`Truth ${c.eff.truth>0?'+':''}${c.eff.truth}`);
+      if (c.eff.cred) tags.push(`Credibility ${c.eff.cred>0?'+':''}${c.eff.cred}`);
+      if (c.eff.cost) tags.push(`Cost ${c.eff.cost>0?'+':''}${c.eff.cost}`);
+      b.innerHTML = `${c.text}<span class="tag">${tags.join(' · ')}</span>`;
+      b.onclick = ()=> choosePush(idx,i);
+      cont.appendChild(b);
+    });
   });
 }
 
@@ -1693,21 +1786,22 @@ function choosePush(idx,ci){
   G.meters.cost  = clamp(G.meters.cost  + (c.eff.cost||0));
   renderMeters();
   hideHint();
-  // show reply, then next
-  $('dialogueText').textContent = c.reply;
+  // show reply, then a continue button (typed in)
   $('choices').innerHTML = '';
-  const next = document.createElement('button');
-  next.className='btn primary';
-  next.style.alignSelf='center';
-  next.textContent = (idx>=ENCOUNTERS.length-1) ? "See the outcome" : "Continue";
-  next.onclick = ()=>{
-    if (idx >= ENCOUNTERS.length-1){
-      fadeOut(()=> showEnding());
-    } else {
-      showEncounter(idx+1);
-    }
-  };
-  $('choices').appendChild(next);
+  typeOut($('dialogueText'), c.reply, ()=>{
+    const next = document.createElement('button');
+    next.className='btn primary';
+    next.style.alignSelf='center';
+    next.textContent = (idx>=ENCOUNTERS.length-1) ? "See the outcome" : "Continue";
+    next.onclick = ()=>{
+      if (idx >= ENCOUNTERS.length-1){
+        fadeOut(()=> showEnding());
+      } else {
+        showEncounter(idx+1);
+      }
+    };
+    $('choices').appendChild(next);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1904,6 +1998,13 @@ $('toolMag').onclick = ()=>{
 // ---------------------------------------------------------------------------
 // Title buttons
 // ---------------------------------------------------------------------------
+// tap the dialogue scene to skip the typewriter
+$('scene').addEventListener('click', e=>{
+  // don't intercept a choice button click
+  if (e.target.closest('.choice') || e.target.closest('.btn')) return;
+  if (_typeSkip) _typeSkip();
+});
+
 $('startBtn').onclick = async ()=>{
   await Audio.start();
   startIntro();
