@@ -157,6 +157,24 @@
     border-radius: 3px; cursor: pointer; font-size: 16px;
   }
 
+  #skipBtn {
+    position: absolute; top: 12px; right: 60px;
+    z-index: 95;
+    background: rgba(8,10,14,0.65);
+    border: 1px solid rgba(201,162,75,0.25);
+    color: var(--muted);
+    padding: 6px 10px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    text-transform: uppercase;
+    display: none;
+  }
+  #skipBtn.show { display: block; }
+  #skipBtn:hover { color: var(--accent); border-color: var(--accent); }
+
   /* Tutorial hint */
   #hint {
     position: absolute;
@@ -571,6 +589,7 @@
       <div class="hud-box" id="hudMid"></div>
       <button id="pauseBtn">II</button>
     </div>
+    <button id="skipBtn" title="Skip to next phase (dev)">Skip ›</button>
 
     <div id="casefile" class="hidden">
       <h4>Case File</h4>
@@ -774,6 +793,7 @@ function show(id){
   Object.values(layers).forEach(l=>l.classList.remove('active'));
   layers[id].classList.add('active');
   G.state = id;
+  if (typeof updateSkipBtn === 'function') updateSkipBtn();
 }
 const $ = id => document.getElementById(id);
 
@@ -2078,6 +2098,49 @@ $('scene').addEventListener('click', e=>{
   if (e.target.closest('.choice') || e.target.closest('.btn')) return;
   if (_typeSkip) _typeSkip();
 });
+
+// Dev/testing: skip to the next phase from anywhere mid-game
+$('skipBtn').onclick = ()=>{
+  switch(G.state){
+    case 'intro': {
+      // jump straight into the field phase
+      beginFieldPhase();
+      break;
+    }
+    case 'field': {
+      if (Field.active) endFieldRound();
+      break;
+    }
+    case 'careerCard': {
+      $('careerNext').click();
+      break;
+    }
+    case 'lab': {
+      if (!Lab.stain) applyStain();
+      if (Lab.active){
+        // log enough deposits to satisfy the threshold
+        Lab.spots.slice(0, Lab.needed).forEach(s=> s.found = true);
+        Lab.found = Lab.needed;
+        updateLabProg();
+        confirmDiagnosis();
+      }
+      break;
+    }
+    case 'pushback': {
+      // skip the line by accepting the first choice / pressing continue
+      if (_typeSkip) _typeSkip();
+      const cont = document.querySelector('#choices .btn.primary');
+      if (cont){ cont.click(); break; }
+      const first = document.querySelector('#choices .choice');
+      if (first){ first.click(); }
+      break;
+    }
+  }
+};
+function updateSkipBtn(){
+  const showOn = ['intro','field','careerCard','lab','pushback'];
+  $('skipBtn').classList.toggle('show', showOn.includes(G.state));
+}
 
 $('startBtn').onclick = async ()=>{
   await Audio.start();
