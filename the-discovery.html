@@ -343,17 +343,23 @@
   .choice {
     font-family: inherit;
     text-align: left;
-    background: transparent;
+    background: rgba(201,162,75,0.04);
     border: 1px solid rgba(201,162,75,0.4);
     color: var(--ink);
-    padding: 14px 16px;
-    border-radius: 5px;
+    padding: 16px 18px;
+    border-radius: 6px;
     font-size: 16px; line-height: 1.4;
     cursor: pointer;
-    transition: background .15s, border-color .15s;
+    transition: background .15s, border-color .15s, transform .08s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    z-index: 1;
   }
-  .choice:hover, .choice:active { background: rgba(201,162,75,0.14); border-color: var(--accent); }
+  .choice:hover { background: rgba(201,162,75,0.14); border-color: var(--accent); }
+  .choice:active { background: rgba(201,162,75,0.28); border-color: var(--accent); transform: scale(0.99); }
   .choice .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display:block; margin-top: 6px; }
+  #choices .btn.primary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; position: relative; z-index: 1; }
 
   /* Prayer moment */
   #prayer {
@@ -1879,13 +1885,14 @@ function showEncounter(idx){
     const cont = $('choices');
     e.choices.forEach((c,i)=>{
       const b = document.createElement('button');
-      b.className='choice';
+      b.type = 'button';
+      b.className = 'choice';
       const tags = [];
       if (c.eff.truth) tags.push(`Truth ${c.eff.truth>0?'+':''}${c.eff.truth}`);
       if (c.eff.cred) tags.push(`Credibility ${c.eff.cred>0?'+':''}${c.eff.cred}`);
       if (c.eff.cost) tags.push(`Cost ${c.eff.cost>0?'+':''}${c.eff.cost}`);
       b.innerHTML = `${c.text}<span class="tag">${tags.join(' · ')}</span>`;
-      b.onclick = ()=> choosePush(idx,i);
+      b.addEventListener('click', (ev)=>{ ev.stopPropagation(); choosePush(idx, i); });
       cont.appendChild(b);
     });
   });
@@ -1903,16 +1910,18 @@ function choosePush(idx,ci){
   $('choices').innerHTML = '';
   typeOut($('dialogueText'), c.reply, ()=>{
     const next = document.createElement('button');
-    next.className='btn primary';
-    next.style.alignSelf='center';
+    next.type = 'button';
+    next.className = 'btn primary';
+    next.style.alignSelf = 'center';
     next.textContent = (idx>=ENCOUNTERS.length-1) ? "See the outcome" : "Continue";
-    next.onclick = ()=>{
+    next.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
       if (idx >= ENCOUNTERS.length-1){
         fadeOut(()=> showEnding());
       } else {
         showEncounter(idx+1);
       }
-    };
+    });
     $('choices').appendChild(next);
   });
 }
