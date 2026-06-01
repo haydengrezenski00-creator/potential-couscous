@@ -405,6 +405,53 @@
   #labStep.show { display: block; }
   #labStep b { color: var(--accent); }
 
+  /* Lab "Apply Stain" primary button — impossible to miss */
+  #labPrime {
+    position: absolute; inset: 0;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 35;
+    pointer-events: none;            /* only the button itself takes input */
+  }
+  #labPrime.show { display: flex; }
+  #labPrimeBtn {
+    pointer-events: auto;
+    font-family: inherit;
+    font-size: clamp(20px, 5vw, 28px);
+    letter-spacing: 4px;
+    padding: 22px 44px;
+    background: var(--accent);
+    color: #14110a;
+    border: none;
+    border-radius: 6px;
+    box-shadow: 0 10px 36px rgba(201,162,75,0.45), 0 0 0 0 rgba(201,162,75,0.7);
+    cursor: pointer;
+    font-weight: bold;
+    text-transform: uppercase;
+    animation: stainPulse 1.4s infinite;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #labPrimeBtn:active { transform: scale(0.96); }
+  #labPrime .lp-sub { color: var(--ink); margin-top: 16px; font-size: 14px; font-style: italic; pointer-events: none; }
+  @keyframes stainPulse {
+    0%,100% { box-shadow: 0 10px 36px rgba(201,162,75,0.45), 0 0 0 0 rgba(201,162,75,0.7);}
+    50%    { box-shadow: 0 10px 36px rgba(201,162,75,0.45), 0 0 0 22px rgba(201,162,75,0);}
+  }
+
+  /* tap ripple feedback */
+  .tap-ripple {
+    position: absolute; width: 60px; height: 60px;
+    border-radius: 50%; pointer-events: none;
+    border: 2px solid var(--accent);
+    transform: translate(-50%,-50%) scale(0.4);
+    opacity: 0.9;
+    animation: tapRipple .55s ease-out forwards;
+    z-index: 36;
+  }
+  @keyframes tapRipple {
+    to { transform: translate(-50%,-50%) scale(1.6); opacity: 0; }
+  }
+
   /* CTE confirmed flash */
   #labConfirm {
     position: absolute; inset: 0;
@@ -490,6 +537,10 @@
     <div id="lab" class="layer">
       <canvas id="labCanvas"></canvas>
       <div id="labStep"></div>
+      <div id="labPrime">
+        <button id="labPrimeBtn" type="button">APPLY STAIN</button>
+        <div class="lp-sub">Reveals the tau protein deposits</div>
+      </div>
       <div id="labConfirm"><div class="lc-inner"><div class="lc-title">CTE CONFIRMED</div><div class="lc-sub" id="lcSub"></div></div></div>
       <div id="prayer"><p id="prayerText"></p></div>
     </div>
@@ -1462,6 +1513,7 @@ function startLabInvestigation(idx){
   $('labtools').classList.remove('hidden');
   $('casefile').classList.remove('hidden');
   $('labStep').classList.add('show');
+  $('labPrime').classList.add('show');
   $('hud').classList.add('hidden');
   G.pausable = true;
 
@@ -1485,7 +1537,7 @@ function updateLabStep(){
   const p = PLAYERS[Lab.index];
   const name = p.name.split(' ').slice(-1)[0];
   if (Lab.step===1){
-    $('labStep').innerHTML = `Brain tissue of <b>${name}</b>. <b>Tap anywhere</b> to apply the stain that reveals tau proteins.`;
+    $('labStep').innerHTML = `Brain tissue of <b>${name}</b>. Press the gold <b>APPLY STAIN</b> button to reveal tau proteins.`;
   } else {
     $('labStep').innerHTML = `Tap each <b>dark tau deposit</b> (gold ring). Log <b>${Lab.needed}</b> to confirm the diagnosis.`;
   }
@@ -1584,6 +1636,7 @@ function applyStain(){
   $('toolStain').textContent = "Stain: ON";
   $('toolStain').classList.add('on');
   $('toolStain').classList.remove('pulse');
+  $('labPrime').classList.remove('show');
   updateLabStep();
   if (Lab.index===0) showHint("Now tap each dark deposit ringed in gold.");
   Audio.sfxDing();
@@ -1593,7 +1646,7 @@ function labTap(px,py){
   if (!Lab.stain){ applyStain(); return; }    // tap anywhere applies the stain
   for (const sp of Lab.spots){
     if (sp.found) continue;
-    if (Math.hypot(sp.x-px, sp.y-py) < sp.r+24){
+    if (Math.hypot(sp.x-px, sp.y-py) < sp.r+34){
       sp.found = true;
       Lab.found++;
       Audio.sfxDing();
@@ -1610,6 +1663,7 @@ function confirmDiagnosis(){
   cancelAnimationFrame(Lab.raf);
   const cf = $('cf'+Lab.index); if (cf) cf.classList.add('found');
   $('labStep').classList.remove('show');
+  $('labPrime').classList.remove('show');
   const p = PLAYERS[Lab.index];
   $('lcSub').textContent = `${p.name} — chronic traumatic encephalopathy`;
   $('labConfirm').classList.add('show');
@@ -1964,16 +2018,7 @@ truckB.addEventListener('touchend', truckOff, {passive:false});
 truckB.addEventListener('mousedown', truckOn);
 truckB.addEventListener('mouseup', truckOff);
 
-// lab pointer — tap to log a deposit (no panning/zoom; the slide fills the view)
-let labDown = null;
-function labPointerDown(px,py){ labDown = {x:px,y:py,t:Date.now()}; Lab.cursor.x=px; Lab.cursor.y=py; Lab.cursor.active=true; }
-function labPointerMove(px,py){ Lab.cursor.x=px; Lab.cursor.y=py; }
-function labPointerUp(px,py){
-  if (labDown && Math.hypot(px-labDown.x,py-labDown.y) < 16 && Date.now()-labDown.t < 500){
-    labTap(px,py);
-  }
-  labDown = null;
-}
+// lab input — unified pointer events; one tap = one log
 function getPos(e, canvas){
   const r = canvas.getBoundingClientRect();
   const t = (e.touches && e.touches.length) ? e.touches[0]
@@ -1981,13 +2026,42 @@ function getPos(e, canvas){
           : e;
   return { x:(t.clientX-r.left), y:(t.clientY-r.top) };
 }
-labCanvas.addEventListener('mousedown', e=>{ const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); });
-labCanvas.addEventListener('mousemove', e=>{ const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); });
-window.addEventListener('mouseup', e=>{ if(G.state==='lab'){ const p=getPos(e,labCanvas); labPointerUp(p.x,p.y);} });
-labCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerDown(p.x,p.y); }, {passive:false});
-labCanvas.addEventListener('touchmove', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerMove(p.x,p.y); }, {passive:false});
-labCanvas.addEventListener('touchend', e=>{ e.preventDefault(); const p=getPos(e,labCanvas); labPointerUp(p.x,p.y); }, {passive:false});
+function tapRipple(clientX, clientY){
+  const r = document.createElement('div');
+  r.className = 'tap-ripple';
+  r.style.left = clientX + 'px';
+  r.style.top  = clientY + 'px';
+  document.body.appendChild(r);
+  setTimeout(()=> r.remove(), 600);
+}
+function labOnTap(e){
+  if (G.state !== 'lab') return;
+  e.preventDefault();
+  const rect = labCanvas.getBoundingClientRect();
+  const t = (e.touches && e.touches.length) ? e.touches[0]
+          : (e.changedTouches && e.changedTouches.length) ? e.changedTouches[0]
+          : e;
+  const clientX = t.clientX, clientY = t.clientY;
+  tapRipple(clientX, clientY);
+  const px = clientX - rect.left, py = clientY - rect.top;
+  Lab.cursor.x = px; Lab.cursor.y = py; Lab.cursor.active = true;
+  labTap(px, py);
+}
+// pointer events cover mouse + touch + pen on every modern browser
+if (window.PointerEvent){
+  labCanvas.addEventListener('pointerdown', labOnTap);
+} else {
+  labCanvas.addEventListener('mousedown', labOnTap);
+  labCanvas.addEventListener('touchstart', labOnTap, {passive:false});
+}
+labCanvas.addEventListener('mousemove', e=>{
+  const r = labCanvas.getBoundingClientRect();
+  Lab.cursor.x = e.clientX - r.left; Lab.cursor.y = e.clientY - r.top;
+  Lab.cursor.active = true;
+});
 
+// the big DOM button is the foolproof way to apply the stain
+$('labPrimeBtn').onclick = ()=> applyStain();
 $('toolStain').onclick = ()=> applyStain();
 $('toolMag').onclick = ()=>{
   Lab.mag = !Lab.mag;
